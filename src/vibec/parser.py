@@ -13,6 +13,7 @@ from .ast import (
   Parameter,
   UnaryExpr,
   WhileStmt,
+  AssignStmt,
   BinaryExpr,
   IntLiteral,
   ReturnStmt,
@@ -187,8 +188,18 @@ class Parser:
       return self._parse_if()
     elif self._check(TokenType.WHILE):
       return self._parse_while()
+    elif self._check(TokenType.IDENT) and self._peek().type == TokenType.ASSIGN:
+      return self._parse_assign()
     else:
       return self._parse_expr_stmt()
+
+  def _parse_assign(self) -> AssignStmt:
+    """Parse: name = expr"""
+    name_token = self._advance()  # consume identifier
+    self._advance()  # consume '='
+    value = self._parse_expression()
+    self._expect(TokenType.NEWLINE, "Expected newline after assignment")
+    return AssignStmt(name_token.value, value)
 
   def _parse_let(self) -> LetStmt:
     """Parse: let name: type = expr"""

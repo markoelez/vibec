@@ -115,8 +115,16 @@ class WhileStmt:
   body: tuple["Stmt", ...]
 
 
+@dataclass(frozen=True, slots=True)
+class AssignStmt:
+  """Variable assignment: x = 42"""
+
+  name: str
+  value: Expr
+
+
 # Statement union type
-Stmt = LetStmt | ReturnStmt | ExprStmt | IfStmt | WhileStmt
+Stmt = LetStmt | AssignStmt | ReturnStmt | ExprStmt | IfStmt | WhileStmt
 
 
 # === Top-level Definitions ===

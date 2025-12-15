@@ -12,6 +12,7 @@ from .ast import (
   Function,
   UnaryExpr,
   WhileStmt,
+  AssignStmt,
   BinaryExpr,
   IntLiteral,
   ReturnStmt,
@@ -90,6 +91,8 @@ class CodeGenerator:
     for stmt in stmts:
       match stmt:
         case LetStmt(_, _, value):
+          self._collect_strings_from_expr(value)
+        case AssignStmt(_, value):
           self._collect_strings_from_expr(value)
         case ReturnStmt(value):
           self._collect_strings_from_expr(value)
@@ -221,6 +224,13 @@ class CodeGenerator:
         self.locals[name] = (offset, type_ann.name)
         self.next_slot += 1
         # Store value
+        self._emit(f"    str x0, [x29, #{offset}]")
+
+      case AssignStmt(name, value):
+        # Evaluate value to x0
+        self._gen_expr(value)
+        # Store to existing variable slot
+        offset, _ = self.locals[name]
         self._emit(f"    str x0, [x29, #{offset}]")
 
       case ReturnStmt(value):

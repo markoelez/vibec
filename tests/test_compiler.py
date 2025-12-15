@@ -161,6 +161,19 @@ class TestParser:
     assert isinstance(stmt.expr.args[0], StringLiteral)
     assert stmt.expr.args[0].value == "hello"
 
+  def test_assignment(self):
+    source = """fn main() -> i64:
+    let x: i64 = 1
+    x = 2
+    return x
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import AssignStmt
+
+    assert isinstance(ast.functions[0].body[1], AssignStmt)
+    assert ast.functions[0].body[1].name == "x"
+
 
 class TestChecker:
   def test_type_mismatch(self):
@@ -230,6 +243,41 @@ class TestChecker:
   def test_string_type_mismatch(self):
     source = """fn main() -> i64:
     let s: str = 42
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_assignment_valid(self):
+    source = """fn main() -> i64:
+    let x: i64 = 1
+    x = 2
+    return x
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
+  def test_assignment_type_mismatch(self):
+    source = """fn main() -> i64:
+    let x: i64 = 1
+    x = true
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_assignment_undefined_variable(self):
+    source = """fn main() -> i64:
+    x = 1
     return 0
 """
     tokens = tokenize(source)
@@ -352,3 +400,34 @@ fn main() -> i64:
     exit_code, stdout = self._compile_and_run(source)
     assert exit_code == 0
     assert stdout.strip() == "line1\nline2"
+
+  def test_variable_reassignment(self):
+    source = """fn main() -> i64:
+    let x: i64 = 1
+    x = 2
+    x = 3
+    return x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 3
+
+  def test_reassignment_with_expression(self):
+    source = """fn main() -> i64:
+    let x: i64 = 10
+    x = x + 5
+    return x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 15
+
+  def test_counter_loop(self):
+    source = """fn main() -> i64:
+    let count: i64 = 0
+    let i: i64 = 0
+    while i < 5:
+        count = count + 1
+        i = i + 1
+    return count
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 5

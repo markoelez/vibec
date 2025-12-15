@@ -14,6 +14,7 @@ from .ast import (
   Function,
   UnaryExpr,
   WhileStmt,
+  AssignStmt,
   BinaryExpr,
   IntLiteral,
   ReturnStmt,
@@ -122,6 +123,12 @@ class TypeChecker:
         if value_type != type_ann.name:
           raise TypeError(f"Cannot assign {value_type} to variable of type {type_ann.name}")
         self._define_var(name, type_ann.name)
+
+      case AssignStmt(name, value):
+        var_type = self._lookup_var(name)
+        value_type = self._check_expr(value)
+        if value_type != var_type:
+          raise TypeError(f"Cannot assign {value_type} to variable of type {var_type}")
 
       case ReturnStmt(value):
         value_type = self._check_expr(value)
