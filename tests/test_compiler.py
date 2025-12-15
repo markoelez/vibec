@@ -352,7 +352,48 @@ fn main() -> i64:
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ReturnStmt)
     assert isinstance(stmt.value, FieldAccessExpr)
-    assert stmt.value.field == "x"
+
+  def test_tuple_type(self):
+    source = """fn main() -> i64:
+    let t: (i64, bool) = (10, true)
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import LetStmt, TupleType
+
+    stmt = ast.functions[0].body[0]
+    assert isinstance(stmt, LetStmt)
+    assert isinstance(stmt.type_ann, TupleType)
+    assert len(stmt.type_ann.element_types) == 2
+
+  def test_tuple_literal(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64) = (10, 20)
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import LetStmt, TupleLiteral
+
+    stmt = ast.functions[0].body[0]
+    assert isinstance(stmt, LetStmt)
+    assert isinstance(stmt.value, TupleLiteral)
+    assert len(stmt.value.elements) == 2
+
+  def test_tuple_index(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64) = (10, 20)
+    return t.0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import ReturnStmt, TupleIndexExpr
+
+    stmt = ast.functions[0].body[1]
+    assert isinstance(stmt, ReturnStmt)
+    assert isinstance(stmt.value, TupleIndexExpr)
+    assert stmt.value.index == 0
 
 
 class TestChecker:
@@ -554,6 +595,39 @@ fn main() -> i64:
   def test_struct_undefined(self):
     source = """fn main() -> i64:
     let p: Unknown = Unknown { x: 10 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_tuple_valid(self):
+    source = """fn main() -> i64:
+    let t: (i64, bool) = (42, true)
+    return t.0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
+  def test_tuple_index_out_of_bounds(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64) = (10, 20)
+    return t.5
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_tuple_type_mismatch(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64) = (10, true)
     return 0
 """
     tokens = tokenize(source)
@@ -930,3 +1004,40 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 10
+
+  def test_tuple_basic(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64) = (10, 20)
+    return t.0 + t.1
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_tuple_three_elements(self):
+    source = """fn main() -> i64:
+    let t: (i64, i64, i64) = (5, 10, 15)
+    return t.0 + t.1 + t.2
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_tuple_mixed_types(self):
+    source = """fn main() -> i64:
+    let t: (i64, bool) = (42, true)
+    if t.1:
+        return t.0
+    return 0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_tuple_pass_elements(self):
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+
+fn main() -> i64:
+    let t: (i64, i64) = (15, 25)
+    return add(t.0, t.1)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 40

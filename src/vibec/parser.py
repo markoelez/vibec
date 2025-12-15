@@ -16,6 +16,7 @@ from .ast import (
   IndexExpr,
   Parameter,
   StructDef,
+  TupleType,
   UnaryExpr,
   WhileStmt,
   AssignStmt,
@@ -26,9 +27,11 @@ from .ast import (
   BoolLiteral,
   StructField,
   ArrayLiteral,
+  TupleLiteral,
   StringLiteral,
   StructLiteral,
   MethodCallExpr,
+  TupleIndexExpr,
   TypeAnnotation,
   FieldAccessExpr,
   FieldAssignStmt,
@@ -201,7 +204,7 @@ class Parser:
     return Parameter(name_token.value, type_ann)
 
   def _parse_type(self) -> TypeAnnotation:
-    """Parse a type annotation: simple, [T; N], or vec[T]."""
+    """Parse a type annotation: simple, [T; N], vec[T], or (T1, T2, ...)."""
     # Array type: [T; N]
     if self._check(TokenType.LBRACKET):
       self._advance()
@@ -210,6 +213,20 @@ class Parser:
       size_token = self._expect(TokenType.INT, "Expected array size")
       self._expect(TokenType.RBRACKET, "Expected ']'")
       return ArrayType(element_type, int(size_token.value))
+
+    # Tuple type: (T1, T2, ...)
+    if self._check(TokenType.LPAREN):
+      self._advance()
+      element_types: list[TypeAnnotation] = []
+      if not self._check(TokenType.RPAREN):
+        element_types.append(self._parse_type())
+        while self._check(TokenType.COMMA):
+          self._advance()
+          if self._check(TokenType.RPAREN):
+            break  # Allow trailing comma
+          element_types.append(self._parse_type())
+      self._expect(TokenType.RPAREN, "Expected ')'")
+      return TupleType(tuple(element_types))
 
     # Simple type or vec[T]
     token = self._expect(TokenType.IDENT, "Expected type name")
@@ -442,15 +459,34 @@ class Parser:
 
     elif token.type == TokenType.LPAREN:
       self._advance()
-      expr = self._parse_expression()
-      self._expect(TokenType.RPAREN, "Expected ')'")
-      return self._parse_postfix(expr)
+      # Could be parenthesized expression or tuple literal
+      if self._check(TokenType.RPAREN):
+        # Empty tuple ()
+        self._advance()
+        return self._parse_postfix(TupleLiteral(()))
+
+      first = self._parse_expression()
+
+      if self._check(TokenType.COMMA):
+        # Tuple literal: (expr, expr, ...)
+        elements: list[Expr] = [first]
+        while self._check(TokenType.COMMA):
+          self._advance()
+          if self._check(TokenType.RPAREN):
+            break  # Allow trailing comma
+          elements.append(self._parse_expression())
+        self._expect(TokenType.RPAREN, "Expected ')'")
+        return self._parse_postfix(TupleLiteral(tuple(elements)))
+      else:
+        # Parenthesized expression
+        self._expect(TokenType.RPAREN, "Expected ')'")
+        return self._parse_postfix(first)
 
     else:
       raise ParseError(f"Unexpected token '{token.value}'", token)
 
   def _parse_postfix(self, expr: Expr) -> Expr:
-    """Parse postfix operations: indexing [i], field access .field, method calls .method()."""
+    """Parse postfix operations: indexing [i], field access .field, tuple index .0, method calls .method()."""
     while True:
       if self._check(TokenType.LBRACKET):
         # Index expression: expr[index]
@@ -459,18 +495,25 @@ class Parser:
         self._expect(TokenType.RBRACKET, "Expected ']'")
         expr = IndexExpr(expr, index)
       elif self._check(TokenType.DOT):
-        # Field access or method call
+        # Field access, tuple index, or method call
         self._advance()
-        member_token = self._expect(TokenType.IDENT, "Expected field or method name")
-        if self._check(TokenType.LPAREN):
-          # Method call: expr.method(args)
-          self._advance()
-          args = self._parse_arguments()
-          self._expect(TokenType.RPAREN, "Expected ')'")
-          expr = MethodCallExpr(expr, member_token.value, tuple(args))
+        if self._check(TokenType.INT):
+          # Tuple index: expr.0, expr.1
+          index_token = self._advance()
+          expr = TupleIndexExpr(expr, int(index_token.value))
+        elif self._check(TokenType.IDENT):
+          member_token = self._advance()
+          if self._check(TokenType.LPAREN):
+            # Method call: expr.method(args)
+            self._advance()
+            args = self._parse_arguments()
+            self._expect(TokenType.RPAREN, "Expected ')'")
+            expr = MethodCallExpr(expr, member_token.value, tuple(args))
+          else:
+            # Field access: expr.field
+            expr = FieldAccessExpr(expr, member_token.value)
         else:
-          # Field access: expr.field
-          expr = FieldAccessExpr(expr, member_token.value)
+          raise ParseError("Expected field name or tuple index", self._current())
       else:
         break
     return expr

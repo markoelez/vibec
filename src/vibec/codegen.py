@@ -14,6 +14,7 @@ from .ast import (
   Function,
   ArrayType,
   IndexExpr,
+  TupleType,
   UnaryExpr,
   WhileStmt,
   AssignStmt,
@@ -23,9 +24,11 @@ from .ast import (
   SimpleType,
   BoolLiteral,
   ArrayLiteral,
+  TupleLiteral,
   StringLiteral,
   StructLiteral,
   MethodCallExpr,
+  TupleIndexExpr,
   TypeAnnotation,
   FieldAccessExpr,
   FieldAssignStmt,
@@ -42,6 +45,8 @@ def type_to_str(t: TypeAnnotation) -> str:
       return f"[{type_to_str(elem)};{size}]"
     case VecType(elem):
       return f"vec[{type_to_str(elem)}]"
+    case TupleType(elems):
+      return f"({','.join(type_to_str(e) for e in elems)})"
   return "unknown"
 
 
@@ -55,6 +60,21 @@ def get_array_size(type_str: str) -> int | None:
 def is_vec_type(type_str: str) -> bool:
   """Check if type is a vec."""
   return type_str.startswith("vec[")
+
+
+def is_tuple_type(type_str: str) -> bool:
+  """Check if type is a tuple."""
+  return type_str.startswith("(") and type_str.endswith(")")
+
+
+def get_tuple_size(type_str: str) -> int:
+  """Get number of elements in a tuple type string."""
+  if not is_tuple_type(type_str):
+    return 0
+  inner = type_str[1:-1]
+  if not inner:
+    return 0
+  return len(inner.split(","))
 
 
 class CodeGenerator:
@@ -184,6 +204,11 @@ class CodeGenerator:
           self._collect_strings_from_expr(value)
       case FieldAccessExpr(target, _):
         self._collect_strings_from_expr(target)
+      case TupleLiteral(elements):
+        for elem in elements:
+          self._collect_strings_from_expr(elem)
+      case TupleIndexExpr(target, _):
+        self._collect_strings_from_expr(target)
       case _:
         pass
 
@@ -245,6 +270,8 @@ class CodeGenerator:
         return size  # Each element is 8 bytes
       case VecType(_):
         return 1  # List is a pointer
+      case TupleType(elems):
+        return len(elems)  # One slot per element
       case SimpleType(name):
         if name in self.structs:
           return len(self.structs[name])  # One slot per field
@@ -355,6 +382,19 @@ class CodeGenerator:
                 for i in range(len(fields)):
                   self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
             self.next_slot += len(fields)
+
+          case TupleType(elems):
+            # Tuple type: initialize elements in place
+            match value:
+              case TupleLiteral(elements):
+                for i, elem in enumerate(elements):
+                  self._gen_expr(elem)
+                  self._emit(f"    str x0, [x29, #{offset - i * 8}]")
+              case _:
+                # Initialize all to zero
+                for i in range(len(elems)):
+                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+            self.next_slot += len(elems)
 
           case _:
             # Simple type: evaluate and store
@@ -659,6 +699,32 @@ class CodeGenerator:
             # Handle nested field access
             self._gen_expr(target)
             # Would need type info to know field offset - limited support
+            pass
+
+      case TupleLiteral(elements):
+        # Tuple literal outside let: allocate temp on stack and return first element
+        # This is uncommon but we handle it
+        for elem in elements:
+          self._gen_expr(elem)
+          self._emit("    str x0, [sp, #-16]!")
+        # Load first element as result (or 0 for empty)
+        if elements:
+          self._emit(f"    ldr x0, [sp, #{(len(elements) - 1) * 16}]")
+        else:
+          self._emit("    mov x0, #0")
+        # Clean up stack
+        self._emit(f"    add sp, sp, #{len(elements) * 16}")
+
+      case TupleIndexExpr(target, index):
+        match target:
+          case VarExpr(name):
+            var_offset, type_str = self.locals[name]
+            if is_tuple_type(type_str):
+              # Load tuple element by index
+              self._emit(f"    ldr x0, [x29, #{var_offset - index * 8}]")
+          case _:
+            # Nested tuple access would need type tracking
+            self._gen_expr(target)
             pass
 
   def _gen_print(self, args: tuple[Expr, ...]) -> None:

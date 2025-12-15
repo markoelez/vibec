@@ -28,6 +28,10 @@ fn main() -> i64:
     nums.push(42)
     nums.push(nums.pop() * 2)
 
+    # Tuples
+    let t: (i64, bool) = (100, true)
+    print(t.0)
+
     # For loops
     for i in range(5):
         print(i)
@@ -41,7 +45,7 @@ fn factorial(n: i64) -> i64:
     return n * factorial(n - 1)
 ```
 
-**Supported:** functions, structs, arrays `[T; N]`, vectors `vec[T]`, `if`/`else`, `while`, `for i in range()`, arithmetic, comparisons, logical ops, `print()`
+**Supported:** functions, structs, tuples `(T1, T2)`, arrays `[T; N]`, vectors `vec[T]`, `if`/`else`, `while`, `for i in range()`, arithmetic, comparisons, logical ops, `print()`
 
 ## Architecture
 

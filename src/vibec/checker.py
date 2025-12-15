@@ -16,6 +16,7 @@ from .ast import (
   Function,
   ArrayType,
   IndexExpr,
+  TupleType,
   UnaryExpr,
   WhileStmt,
   AssignStmt,
@@ -25,9 +26,11 @@ from .ast import (
   SimpleType,
   BoolLiteral,
   ArrayLiteral,
+  TupleLiteral,
   StringLiteral,
   StructLiteral,
   MethodCallExpr,
+  TupleIndexExpr,
   TypeAnnotation,
   FieldAccessExpr,
   FieldAssignStmt,
@@ -58,6 +61,8 @@ def type_to_str(t: TypeAnnotation) -> str:
       return f"[{type_to_str(elem)};{size}]"
     case VecType(elem):
       return f"vec[{type_to_str(elem)}]"
+    case TupleType(elems):
+      return f"({','.join(type_to_str(e) for e in elems)})"
   raise TypeError(f"Unknown type annotation: {t}")
 
 
@@ -80,6 +85,22 @@ def is_array_type(type_str: str) -> bool:
 def is_vec_type(type_str: str) -> bool:
   """Check if type string represents a vec."""
   return type_str.startswith("vec[")
+
+
+def is_tuple_type(type_str: str) -> bool:
+  """Check if type string represents a tuple."""
+  return type_str.startswith("(") and type_str.endswith(")")
+
+
+def get_tuple_element_types(type_str: str) -> list[str]:
+  """Extract element types from tuple type string like (i64,bool) -> ['i64', 'bool']."""
+  if not is_tuple_type(type_str):
+    return []
+  inner = type_str[1:-1]  # Remove parens
+  if not inner:
+    return []
+  # Simple split - works for non-nested types
+  return [t.strip() for t in inner.split(",")]
 
 
 @dataclass
@@ -141,6 +162,9 @@ class TypeChecker:
       case VecType(elem):
         elem_str = self._check_type_ann(elem)
         return f"vec[{elem_str}]"
+      case TupleType(elems):
+        elem_strs = [self._check_type_ann(e) for e in elems]
+        return f"({','.join(elem_strs)})"
     raise TypeError(f"Unknown type annotation: {t}")
 
   def check(self, program: Program) -> None:
@@ -361,6 +385,19 @@ class TypeChecker:
         if field not in struct_info.fields:
           raise TypeError(f"Struct '{target_type}' has no field '{field}'")
         return struct_info.fields[field]
+
+      case TupleLiteral(elements):
+        elem_types = [self._check_expr(e) for e in elements]
+        return f"({','.join(elem_types)})"
+
+      case TupleIndexExpr(target, index):
+        target_type = self._check_expr(target)
+        if not is_tuple_type(target_type):
+          raise TypeError(f"Cannot index non-tuple type {target_type}")
+        elem_types = get_tuple_element_types(target_type)
+        if index < 0 or index >= len(elem_types):
+          raise TypeError(f"Tuple index {index} out of bounds for tuple with {len(elem_types)} elements")
+        return elem_types[index]
 
       case BinaryExpr(left, op, right):
         left_type = self._check_expr(left)

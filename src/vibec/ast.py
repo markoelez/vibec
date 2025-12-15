@@ -27,8 +27,15 @@ class VecType:
   element_type: "TypeAnnotation"
 
 
+@dataclass(frozen=True, slots=True)
+class TupleType:
+  """Tuple type like (i64, bool, str)."""
+
+  element_types: tuple["TypeAnnotation", ...]
+
+
 # Type annotation union
-TypeAnnotation = SimpleType | ArrayType | VecType
+TypeAnnotation = SimpleType | ArrayType | VecType | TupleType
 
 
 # === Expressions ===
@@ -127,6 +134,21 @@ class FieldAccessExpr:
   field: str
 
 
+@dataclass(frozen=True, slots=True)
+class TupleLiteral:
+  """Tuple literal like (10, 20, 30)."""
+
+  elements: tuple["Expr", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TupleIndexExpr:
+  """Tuple index access like t.0 or t.1."""
+
+  target: "Expr"
+  index: int
+
+
 # Expression union type
 Expr = (
   IntLiteral
@@ -141,6 +163,8 @@ Expr = (
   | MethodCallExpr
   | StructLiteral
   | FieldAccessExpr
+  | TupleLiteral
+  | TupleIndexExpr
 )
 
 
