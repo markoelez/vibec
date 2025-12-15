@@ -499,8 +499,15 @@ class CodeGenerator:
       self.next_slot += slots_needed
 
     # Generate body
-    for stmt in func.body:
-      self._gen_stmt(stmt)
+    # Handle implicit return: if last statement is ExprStmt, treat as return
+    for i, stmt in enumerate(func.body):
+      is_last = i == len(func.body) - 1
+      if is_last and isinstance(stmt, ExprStmt):
+        # Generate expression and return its value
+        self._gen_expr(stmt.expr)
+        self._emit(f"    b _{func_label}_epilogue")
+      else:
+        self._gen_stmt(stmt)
 
     # Epilogue
     self._emit(f"_{func_label}_epilogue:")

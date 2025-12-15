@@ -1557,6 +1557,33 @@ fn main() -> i64:
     with pytest.raises(TypeError, match="expects 2 arguments, got 3"):
       check(ast)
 
+  # === Implicit Return Checker Tests ===
+
+  def test_implicit_return_type_mismatch(self):
+    """Test that implicit return type mismatch raises TypeError."""
+    source = """fn foo() -> i64:
+    true
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Implicit return type bool doesn't match function return type i64"):
+      check(ast)
+
+  def test_implicit_return_valid(self):
+    """Test that valid implicit return passes type checking."""
+    source = """fn foo() -> i64:
+    42
+fn main() -> i64:
+    foo()
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
 
 @pytest.mark.skipif(
   subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip() != "arm64",
@@ -2331,3 +2358,113 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 15  # 1+2+3+4+5 = 15
+
+  # === Implicit Return Tests ===
+
+  def test_implicit_return_simple(self):
+    """Test implicit return with a simple literal."""
+    source = """fn answer() -> i64:
+    42
+
+fn main() -> i64:
+    answer()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_implicit_return_expression(self):
+    """Test implicit return with an expression."""
+    source = """fn compute(x: i64) -> i64:
+    x * 2 + 1
+
+fn main() -> i64:
+    compute(20)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 41  # 20*2+1 = 41
+
+  def test_implicit_return_variable(self):
+    """Test implicit return with a variable."""
+    source = """fn get_val() -> i64:
+    let result: i64 = 99
+    result
+
+fn main() -> i64:
+    get_val()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 99
+
+  def test_implicit_return_function_call(self):
+    """Test implicit return with a function call."""
+    source = """fn double(n: i64) -> i64:
+    n * 2
+
+fn triple(n: i64) -> i64:
+    double(n) + n
+
+fn main() -> i64:
+    triple(10)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30  # 10*2 + 10 = 30
+
+  def test_implicit_return_with_statements(self):
+    """Test implicit return after other statements."""
+    source = """fn process(x: i64) -> i64:
+    let a: i64 = x + 1
+    let b: i64 = a * 2
+    a + b
+
+fn main() -> i64:
+    process(5)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 18  # a=6, b=12, 6+12=18
+
+  def test_implicit_return_main(self):
+    """Test implicit return in main function."""
+    source = """fn main() -> i64:
+    let x: i64 = 7
+    x * 8
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 56
+
+  def test_implicit_return_bool(self):
+    """Test implicit return with boolean expression."""
+    source = """fn is_positive(n: i64) -> bool:
+    n > 0
+
+fn main() -> i64:
+    if is_positive(5):
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_explicit_return_still_works(self):
+    """Ensure explicit return still works."""
+    source = """fn explicit() -> i64:
+    return 123
+
+fn main() -> i64:
+    explicit()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 123
+
+  def test_implicit_return_struct_field(self):
+    """Test implicit return with struct field access."""
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let pt: Point = Point { x: 42, y: 10 }
+    pt.x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42

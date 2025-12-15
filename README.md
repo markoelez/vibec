@@ -49,25 +49,33 @@ fn main() -> i64:
 - Cannot use values after they've been moved
 - Cannot move values inside loops
 
+**Rust-style Implicit Return:**
+```
+fn factorial(n: i64) -> i64:
+    if n <= 1:
+        return 1
+    n * factorial(n - 1)  # Last expression is implicitly returned
+
+fn square(x: i64) -> i64:
+    x * x  # No 'return' keyword needed
+
+fn main() -> i64:
+    print(factorial(5))  # 120
+    0  # Implicit return
+```
+
 **Python-style Keyword Arguments:**
 ```
 fn greet(name: i64, count: i64) -> i64:
-    return name * count
+    name * count  # Implicit return
 
 fn main() -> i64:
-    # Positional arguments
-    let a: i64 = greet(10, 5)
-    
-    # Keyword arguments (any order)
-    let b: i64 = greet(count=5, name=10)
-    
-    # Mixed: positional first, then keyword
-    let c: i64 = greet(10, count=5)
-    
-    return 0
+    greet(10, 5)             # Positional
+    greet(count=5, name=10)  # Keyword (any order)
+    greet(10, count=5)       # Mixed
 ```
 
-**Supported:** ownership & borrowing, enums with `match`, functions with keyword args, structs with `impl` methods, tuples, arrays, vectors, closures, `if`/`else`, `while`, `for i in range()`, references `&T`/`&mut T`.
+**Supported:** implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures, `if`/`else`, `while`, `for i in range()`, references `&T`/`&mut T`.
 
 
 ## Architecture

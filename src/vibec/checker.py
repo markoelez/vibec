@@ -532,6 +532,14 @@ class TypeChecker:
     for stmt in func.body:
       self._check_stmt(stmt)
 
+    # Check for implicit return: if last statement is ExprStmt, verify type matches
+    if func.body:
+      last_stmt = func.body[-1]
+      if isinstance(last_stmt, ExprStmt):
+        expr_type = self._check_expr(last_stmt.expr)
+        if expr_type != self.current_return_type:
+          raise TypeError(f"Implicit return type {expr_type} doesn't match function return type {self.current_return_type}")
+
     self.current_return_type = None
     self._exit_scope()
 
