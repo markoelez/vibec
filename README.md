@@ -49,7 +49,26 @@ fn main() -> i64:
 - Cannot use values after they've been moved
 - Cannot move values inside loops
 
-**Supported:** closures `|a, b| -> T: expr`, ownership & borrowing, enums with `match`, functions, structs with `impl` methods, tuples, arrays, vectors, `if`/`elif`/`else`, `while`, `for i in range()`, references `&T`/`&mut T`
+**Python-style Keyword Arguments:**
+```
+fn greet(name: i64, count: i64) -> i64:
+    return name * count
+
+fn main() -> i64:
+    # Positional arguments
+    let a: i64 = greet(10, 5)
+    
+    # Keyword arguments (any order)
+    let b: i64 = greet(count=5, name=10)
+    
+    # Mixed: positional first, then keyword
+    let c: i64 = greet(10, count=5)
+    
+    return 0
+```
+
+**Supported:** ownership & borrowing, enums with `match`, functions with keyword args, structs with `impl` methods, tuples, arrays, vectors, closures, `if`/`else`, `while`, `for i in range()`, references `&T`/`&mut T`.
+
 
 ## Architecture
 

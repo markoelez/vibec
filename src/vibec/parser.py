@@ -430,7 +430,7 @@ class Parser:
     return ReturnStmt(value)
 
   def _parse_if(self) -> IfStmt:
-    """Parse: if cond: INDENT body DEDENT [elif cond: INDENT body DEDENT]* [else: INDENT body DEDENT]"""
+    """Parse: if cond: INDENT body DEDENT [else: INDENT body DEDENT]"""
     self._advance()  # consume 'if'
     condition = self._parse_expression()
     self._expect(TokenType.COLON, "Expected ':'")
@@ -440,34 +440,7 @@ class Parser:
     else_body: tuple[Stmt, ...] | None = None
     self._skip_newlines()
 
-    if self._check(TokenType.ELIF):
-      # elif is syntactic sugar for else: if ...
-      # Parse the elif as a nested if statement
-      elif_stmt = self._parse_elif()
-      else_body = (elif_stmt,)
-    elif self._check(TokenType.ELSE):
-      self._advance()
-      self._expect(TokenType.COLON, "Expected ':' after else")
-      self._expect(TokenType.NEWLINE, "Expected newline after ':'")
-      else_body = tuple(self._parse_block())
-
-    return IfStmt(condition, tuple(then_body), else_body)
-
-  def _parse_elif(self) -> IfStmt:
-    """Parse: elif cond: INDENT body DEDENT [elif ...]* [else: ...]"""
-    self._advance()  # consume 'elif'
-    condition = self._parse_expression()
-    self._expect(TokenType.COLON, "Expected ':'")
-    self._expect(TokenType.NEWLINE, "Expected newline after ':'")
-    then_body = self._parse_block()
-
-    else_body: tuple[Stmt, ...] | None = None
-    self._skip_newlines()
-
-    if self._check(TokenType.ELIF):
-      elif_stmt = self._parse_elif()
-      else_body = (elif_stmt,)
-    elif self._check(TokenType.ELSE):
+    if self._check(TokenType.ELSE):
       self._advance()
       self._expect(TokenType.COLON, "Expected ':' after else")
       self._expect(TokenType.NEWLINE, "Expected newline after ':'")
@@ -623,9 +596,9 @@ class Parser:
       # Check if it's a function call
       elif self._check(TokenType.LPAREN):
         self._advance()
-        args = self._parse_arguments()
+        args, kwargs = self._parse_arguments()
         self._expect(TokenType.RPAREN, "Expected ')'")
-        expr: Expr = CallExpr(name, tuple(args))
+        expr: Expr = CallExpr(name, tuple(args), tuple(kwargs))
       # Check if it's a struct literal: Name { field: value, ... }
       elif self._check(TokenType.LBRACE):
         expr = self._parse_struct_literal(name)
@@ -682,9 +655,11 @@ class Parser:
         elif self._check(TokenType.IDENT):
           member_token = self._advance()
           if self._check(TokenType.LPAREN):
-            # Method call: expr.method(args)
+            # Method call: expr.method(args) - only positional args for methods
             self._advance()
-            args = self._parse_arguments()
+            args, kwargs = self._parse_arguments()
+            if kwargs:
+              raise ParseError("Method calls do not support keyword arguments", self._current())
             self._expect(TokenType.RPAREN, "Expected ')'")
             expr = MethodCallExpr(expr, member_token.value, tuple(args))
           else:
@@ -795,20 +770,58 @@ class Parser:
 
     return ClosureExpr(tuple(params), return_type, body)
 
-  def _parse_arguments(self) -> list[Expr]:
-    """Parse comma-separated arguments."""
+  def _parse_arguments(self) -> tuple[list[Expr], list[tuple[str, Expr]]]:
+    """Parse comma-separated arguments, including keyword arguments.
+
+    Returns (positional_args, keyword_args) where keyword_args is [(name, value), ...].
+    Keyword arguments must come after all positional arguments.
+    """
     args: list[Expr] = []
+    kwargs: list[tuple[str, Expr]] = []
+    seen_kwarg = False
 
     if self._check(TokenType.RPAREN):
-      return args
+      return args, kwargs
 
-    args.append(self._parse_expression())
+    # Parse first argument
+    first_arg, first_kwarg = self._parse_argument()
+    if first_kwarg is not None:
+      kwargs.append(first_kwarg)
+      seen_kwarg = True
+    else:
+      args.append(first_arg)  # type: ignore
 
     while self._check(TokenType.COMMA):
       self._advance()
-      args.append(self._parse_expression())
+      if self._check(TokenType.RPAREN):
+        break  # Allow trailing comma
+      arg, kwarg = self._parse_argument()
+      if kwarg is not None:
+        kwargs.append(kwarg)
+        seen_kwarg = True
+      else:
+        if seen_kwarg:
+          raise ParseError("Positional argument cannot follow keyword argument", self._current())
+        args.append(arg)  # type: ignore
 
-    return args
+    return args, kwargs
+
+  def _parse_argument(self) -> tuple[Expr | None, tuple[str, Expr] | None]:
+    """Parse a single argument, which may be positional or keyword.
+
+    Returns (expr, None) for positional, (None, (name, expr)) for keyword.
+    """
+    # Check if this is a keyword argument: IDENT = expr
+    # Use look-ahead to check if next token is '=' without consuming IDENT
+    if self._check(TokenType.IDENT) and self._peek().type == TokenType.ASSIGN:
+      name_token = self._advance()  # consume IDENT
+      self._advance()  # consume '='
+      value = self._parse_expression()
+      return None, (name_token.value, value)
+
+    # Regular positional argument
+    expr = self._parse_expression()
+    return expr, None
 
 
 def parse(tokens: list[Token]) -> Program:

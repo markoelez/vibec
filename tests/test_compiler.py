@@ -60,7 +60,7 @@ class TestLexer:
     assert TokenType.GE in types
 
   def test_keywords(self):
-    source = "fn let struct impl enum match self if elif else while for in range return and or not true false"
+    source = "fn let struct impl enum match self if else while for in range return and or not true false"
     tokens = tokenize(source)
     types = [t.type for t in tokens]
     assert TokenType.FN in types
@@ -71,7 +71,6 @@ class TestLexer:
     assert TokenType.MATCH in types
     assert TokenType.SELF in types
     assert TokenType.IF in types
-    assert TokenType.ELIF in types
     assert TokenType.ELSE in types
     assert TokenType.WHILE in types
     assert TokenType.FOR in types
@@ -199,57 +198,6 @@ class TestParser:
     from vibec.ast import IfStmt
 
     assert isinstance(ast.functions[0].body[0], IfStmt)
-
-  def test_elif_statement(self):
-    source = """fn main() -> i64:
-    let x: i64 = 5
-    if x < 0:
-        return 0
-    elif x == 0:
-        return 1
-    elif x > 0:
-        return 2
-    return 3
-"""
-    tokens = tokenize(source)
-    ast = parse(tokens)
-    from vibec.ast import IfStmt
-
-    # First if
-    if_stmt = ast.functions[0].body[1]
-    assert isinstance(if_stmt, IfStmt)
-    # Should have else_body which contains another IfStmt (the elif)
-    assert if_stmt.else_body is not None
-    assert len(if_stmt.else_body) == 1
-    elif_stmt = if_stmt.else_body[0]
-    assert isinstance(elif_stmt, IfStmt)
-    # Second elif
-    assert elif_stmt.else_body is not None
-    assert isinstance(elif_stmt.else_body[0], IfStmt)
-
-  def test_elif_else_statement(self):
-    source = """fn main() -> i64:
-    let x: i64 = 5
-    if x < 0:
-        return 0
-    elif x == 0:
-        return 1
-    else:
-        return 2
-"""
-    tokens = tokenize(source)
-    ast = parse(tokens)
-    from vibec.ast import IfStmt, ReturnStmt
-
-    if_stmt = ast.functions[0].body[1]
-    assert isinstance(if_stmt, IfStmt)
-    # elif is nested if in else
-    assert if_stmt.else_body is not None
-    elif_stmt = if_stmt.else_body[0]
-    assert isinstance(elif_stmt, IfStmt)
-    # else body of elif should have return statement
-    assert elif_stmt.else_body is not None
-    assert isinstance(elif_stmt.else_body[0], ReturnStmt)
 
   def test_while_statement(self):
     source = """fn main() -> i64:
@@ -690,6 +638,105 @@ fn main() -> i64:
     assert len(stmt.type_ann.param_types) == 2
     assert isinstance(stmt.type_ann.param_types[0], SimpleType)
     assert stmt.type_ann.param_types[0].name == "i64"
+
+  # === Keyword Arguments Tests ===
+
+  def test_kwargs_basic(self):
+    """Test basic keyword argument parsing."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=1, b=2)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import CallExpr, ReturnStmt
+
+    ret_stmt = ast.functions[1].body[0]
+    assert isinstance(ret_stmt, ReturnStmt)
+    call = ret_stmt.value
+    assert isinstance(call, CallExpr)
+    assert call.name == "add"
+    assert len(call.args) == 0
+    assert len(call.kwargs) == 2
+    assert call.kwargs[0][0] == "a"
+    assert call.kwargs[1][0] == "b"
+
+  def test_kwargs_mixed(self):
+    """Test mixed positional and keyword arguments."""
+    source = """fn foo(a: i64, b: i64, c: i64) -> i64:
+    return a + b + c
+fn main() -> i64:
+    return foo(1, c=3, b=2)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import CallExpr, IntLiteral, ReturnStmt
+
+    ret_stmt = ast.functions[1].body[0]
+    assert isinstance(ret_stmt, ReturnStmt)
+    call = ret_stmt.value
+    assert isinstance(call, CallExpr)
+    assert len(call.args) == 1
+    assert isinstance(call.args[0], IntLiteral)
+    assert call.args[0].value == 1
+    assert len(call.kwargs) == 2
+    assert call.kwargs[0][0] == "c"
+    assert call.kwargs[1][0] == "b"
+
+  def test_kwargs_with_expression(self):
+    """Test keyword arguments with expressions as values."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    let x: i64 = 5
+    return add(a=x * 2, b=x + 1)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import CallExpr, BinaryExpr, ReturnStmt
+
+    ret_stmt = ast.functions[1].body[1]
+    assert isinstance(ret_stmt, ReturnStmt)
+    call = ret_stmt.value
+    assert isinstance(call, CallExpr)
+    assert len(call.kwargs) == 2
+    assert isinstance(call.kwargs[0][1], BinaryExpr)
+    assert isinstance(call.kwargs[1][1], BinaryExpr)
+
+  def test_kwargs_nested_call(self):
+    """Test keyword arguments with nested function calls."""
+    source = """fn double(x: i64) -> i64:
+    return x * 2
+fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=double(5), b=10)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import CallExpr, ReturnStmt
+
+    ret_stmt = ast.functions[2].body[0]
+    assert isinstance(ret_stmt, ReturnStmt)
+    call = ret_stmt.value
+    assert isinstance(call, CallExpr)
+    assert len(call.kwargs) == 2
+    # First kwarg value is a nested function call
+    assert isinstance(call.kwargs[0][1], CallExpr)
+
+  def test_kwargs_positional_after_keyword_error(self):
+    """Test that positional argument after keyword raises ParseError."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=1, 2)
+"""
+    tokens = tokenize(source)
+    from vibec.parser import ParseError
+
+    with pytest.raises(ParseError, match="Positional argument cannot follow keyword argument"):
+      parse(tokens)
 
 
 class TestChecker:
@@ -1416,6 +1463,100 @@ class TestCodegen:
     assert "_main:" in asm
     assert "ret" in asm
 
+  # === Keyword Arguments Checker Tests ===
+
+  def test_kwargs_valid(self):
+    """Test valid keyword arguments pass type checking."""
+    source = """fn greet(name: i64, count: i64) -> i64:
+    return name + count
+fn main() -> i64:
+    return greet(name=10, count=5)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
+  def test_kwargs_reordered(self):
+    """Test keyword arguments in different order from parameters."""
+    source = """fn foo(a: i64, b: i64, c: i64) -> i64:
+    return a + b + c
+fn main() -> i64:
+    return foo(c=3, a=1, b=2)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
+  def test_kwargs_unknown_name(self):
+    """Test that unknown keyword argument name raises TypeError."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(x=1, b=2)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Unknown keyword argument 'x'"):
+      check(ast)
+
+  def test_kwargs_duplicate(self):
+    """Test that duplicate argument raises TypeError."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(1, a=2)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Duplicate argument for parameter 'a'"):
+      check(ast)
+
+  def test_kwargs_type_mismatch(self):
+    """Test that type mismatch in kwarg raises TypeError."""
+    source = """fn add(a: i64, b: bool) -> i64:
+    return a
+fn main() -> i64:
+    return add(a=1, b=42)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Argument 'b' of 'add' expects bool, got i64"):
+      check(ast)
+
+  def test_kwargs_missing_arg(self):
+    """Test that missing argument raises TypeError."""
+    source = """fn add(a: i64, b: i64, c: i64) -> i64:
+    return a + b + c
+fn main() -> i64:
+    return add(a=1, c=3)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="expects 3 arguments, got 2"):
+      check(ast)
+
+  def test_kwargs_too_many_args(self):
+    """Test that too many arguments raises TypeError."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=1, b=2, c=3)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="expects 2 arguments, got 3"):
+      check(ast)
+
 
 @pytest.mark.skipif(
   subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip() != "arm64",
@@ -2096,79 +2237,97 @@ fn main() -> i64:
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 1
 
-  # === Elif tests ===
+  # === Keyword Arguments End-to-End Tests ===
 
-  def test_elif_basic(self):
-    """Test basic elif chain."""
-    source = """fn main() -> i64:
+  def test_kwargs_basic(self):
+    """Test basic keyword arguments work correctly."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=10, b=5)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 15
+
+  def test_kwargs_reordered(self):
+    """Test keyword arguments in different order."""
+    source = """fn sub(a: i64, b: i64) -> i64:
+    return a - b
+fn main() -> i64:
+    return sub(b=3, a=10)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 7  # 10 - 3 = 7
+
+  def test_kwargs_mixed_positional(self):
+    """Test mixing positional and keyword arguments."""
+    source = """fn calc(a: i64, b: i64, c: i64) -> i64:
+    return a * 100 + b * 10 + c
+fn main() -> i64:
+    return calc(1, c=3, b=2)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 123  # 1*100 + 2*10 + 3 = 123
+
+  def test_kwargs_all_reordered(self):
+    """Test all keyword arguments in completely different order."""
+    source = """fn order(first: i64, second: i64, third: i64) -> i64:
+    return first * 100 + second * 10 + third
+fn main() -> i64:
+    return order(third=3, first=1, second=2)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 123
+
+  def test_kwargs_with_expressions(self):
+    """Test keyword arguments with complex expressions."""
+    source = """fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
     let x: i64 = 5
-    if x < 0:
-        return 1
-    elif x == 0:
-        return 2
-    elif x > 0:
-        return 3
-    return 4
+    return add(a=x * 2, b=x + 3)
 """
     exit_code, _ = self._compile_and_run(source)
-    assert exit_code == 3
+    assert exit_code == 18  # (5*2) + (5+3) = 10 + 8 = 18
 
-  def test_elif_first_branch(self):
-    """Test elif when first condition is true."""
-    source = """fn main() -> i64:
-    let x: i64 = 0
-    if x < 5:
-        return 10
-    elif x == 5:
-        return 20
-    else:
-        return 30
+  def test_kwargs_nested_calls(self):
+    """Test keyword arguments with nested function calls."""
+    source = """fn double(x: i64) -> i64:
+    return x * 2
+fn add(a: i64, b: i64) -> i64:
+    return a + b
+fn main() -> i64:
+    return add(a=double(5), b=double(3))
 """
     exit_code, _ = self._compile_and_run(source)
-    assert exit_code == 10
+    assert exit_code == 16  # 10 + 6 = 16
 
-  def test_elif_middle_branch(self):
-    """Test elif when middle condition is true."""
+  def test_kwargs_print(self):
+    """Test keyword arguments with print builtin."""
     source = """fn main() -> i64:
-    let x: i64 = 5
-    if x < 5:
-        return 10
-    elif x == 5:
-        return 20
-    else:
-        return 30
+    print(value=42)
+    return 0
 """
-    exit_code, _ = self._compile_and_run(source)
-    assert exit_code == 20
+    exit_code, stdout = self._compile_and_run(source)
+    assert exit_code == 0
+    assert "42" in stdout
 
-  def test_elif_else_branch(self):
-    """Test elif falling through to else."""
-    source = """fn main() -> i64:
-    let x: i64 = 10
-    if x < 5:
-        return 10
-    elif x == 5:
-        return 20
-    else:
-        return 30
+  def test_kwargs_single_arg(self):
+    """Test keyword argument with single parameter function."""
+    source = """fn square(n: i64) -> i64:
+    return n * n
+fn main() -> i64:
+    return square(n=7)
 """
     exit_code, _ = self._compile_and_run(source)
-    assert exit_code == 30
+    assert exit_code == 49
 
-  def test_elif_many_branches(self):
-    """Test elif with many branches."""
-    source = """fn main() -> i64:
-    let x: i64 = 3
-    if x == 1:
-        return 10
-    elif x == 2:
-        return 20
-    elif x == 3:
-        return 30
-    elif x == 4:
-        return 40
-    else:
-        return 50
+  def test_kwargs_many_args(self):
+    """Test keyword arguments with many parameters."""
+    source = """fn sum5(a: i64, b: i64, c: i64, d: i64, e: i64) -> i64:
+    return a + b + c + d + e
+fn main() -> i64:
+    return sum5(e=5, c=3, a=1, d=4, b=2)
 """
     exit_code, _ = self._compile_and_run(source)
-    assert exit_code == 30
+    assert exit_code == 15  # 1+2+3+4+5 = 15

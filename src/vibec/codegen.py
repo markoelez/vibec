@@ -138,6 +138,8 @@ class CodeGenerator:
     # Closures: list of (label, params, return_type, body) to generate at end
     self.closures: list[tuple[str, tuple[Parameter, ...], TypeAnnotation, Expr]] = []
     self.closure_counter = 0
+    # Function parameter names: function_name -> list of param names (for kwargs resolution)
+    self.function_params: dict[str, list[str]] = {}
 
   def _emit(self, line: str) -> None:
     self.output.append(line)
@@ -223,9 +225,11 @@ class CodeGenerator:
         self._collect_strings_from_expr(right)
       case UnaryExpr(_, operand):
         self._collect_strings_from_expr(operand)
-      case CallExpr(_, args):
+      case CallExpr(_, args, kwargs):
         for arg in args:
           self._collect_strings_from_expr(arg)
+        for _, kwarg_value in kwargs:
+          self._collect_strings_from_expr(kwarg_value)
       case ArrayLiteral(elements):
         for elem in elements:
           self._collect_strings_from_expr(elem)
@@ -288,6 +292,10 @@ class CodeGenerator:
       for method in impl.methods:
         mangled_name = f"{impl.struct_name}_{method.name}"
         self.struct_methods[impl.struct_name][method.name] = mangled_name
+
+    # Register function parameter names (for kwargs resolution)
+    for func in program.functions:
+      self.function_params[func.name] = [p.name for p in func.params]
 
     # First pass: collect all string literals
     self._collect_strings(program)
@@ -834,14 +842,16 @@ class CodeGenerator:
             self._emit("    cmp x0, #0")
             self._emit("    cset x0, eq")
 
-      case CallExpr(name, args):
+      case CallExpr(name, args, kwargs):
+        # Resolve kwargs to positional order
+        resolved_args = self._resolve_kwargs_codegen(name, args, kwargs)
         if name == "print":
-          self._gen_print(args)
+          self._gen_print(resolved_args)
         elif name in self.locals:
           # Closure call - variable holds a function pointer
-          self._gen_closure_call(name, args)
+          self._gen_closure_call(name, resolved_args)
         else:
-          self._gen_call(name, args)
+          self._gen_call(name, resolved_args)
 
       case ArrayLiteral(elements):
         # Array literal outside of let: shouldn't happen after type checking
@@ -1036,6 +1046,26 @@ class CodeGenerator:
         return type_name == "str"
       case _:
         return False
+
+  def _resolve_kwargs_codegen(self, name: str, args: tuple[Expr, ...], kwargs: tuple[tuple[str, Expr], ...]) -> tuple[Expr, ...]:
+    """Resolve kwargs to positional argument order for codegen."""
+    if not kwargs:
+      return args
+
+    # Get param names for this function
+    param_names = self.function_params.get(name)
+    if param_names is None:
+      # Built-in function like print - kwargs validated by checker, extract values in order
+      return args + tuple(value for _, value in kwargs)
+
+    # Build resolved list
+    resolved: list[Expr | None] = list(args) + [None] * len(kwargs)
+
+    for kwarg_name, kwarg_value in kwargs:
+      param_idx = param_names.index(kwarg_name)  # Checker already validated
+      resolved[param_idx] = kwarg_value
+
+    return tuple(resolved)  # type: ignore
 
   def _gen_call(self, name: str, args: tuple[Expr, ...]) -> None:
     """Generate code for a function call."""

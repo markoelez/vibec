@@ -25,6 +25,7 @@ examples/enums
 examples/impl
 examples/references
 examples/closures
+examples/kwargs
 
 # uv lock file
 uv.lock

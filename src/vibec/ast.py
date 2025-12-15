@@ -104,10 +104,11 @@ class UnaryExpr:
 
 @dataclass(frozen=True, slots=True)
 class CallExpr:
-  """Function call like foo(1, 2)."""
+  """Function call like foo(1, 2) or foo(x=1, y=2)."""
 
   name: str
   args: tuple["Expr", ...]
+  kwargs: tuple[tuple[str, "Expr"], ...] = ()  # (name, value) pairs
 
 
 @dataclass(frozen=True, slots=True)

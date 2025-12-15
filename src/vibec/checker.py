@@ -57,6 +57,7 @@ class TypeError(Exception):
 class FunctionSignature:
   """Stores a function's type signature."""
 
+  param_names: tuple[str, ...]  # Parameter names for keyword argument resolution
   param_types: tuple[str, ...]
   return_type: str
 
@@ -221,7 +222,7 @@ class TypeChecker:
 
   # Built-in function signatures
   BUILTINS: dict[str, FunctionSignature] = {
-    "print": FunctionSignature(("i64",), "i64"),  # print returns 0
+    "print": FunctionSignature(("value",), ("i64",), "i64"),  # print returns 0
   }
 
   def __init__(self) -> None:
@@ -291,6 +292,51 @@ class TypeChecker:
     state = self._lookup_var_state(name)
     if state is not None and state.ownership == "moved":
       raise TypeError(f"Use of moved variable '{name}'")
+
+  def _resolve_kwargs(
+    self,
+    func_name: str,
+    sig: FunctionSignature,
+    args: tuple[Expr, ...],
+    kwargs: tuple[tuple[str, Expr], ...],
+  ) -> list[Expr]:
+    """Resolve positional and keyword arguments to parameter order.
+
+    Returns a list of expressions in the order of the function's parameters.
+    """
+    num_params = len(sig.param_names)
+    total_args = len(args) + len(kwargs)
+
+    if total_args != num_params:
+      raise TypeError(f"Function '{func_name}' expects {num_params} arguments, got {total_args}")
+
+    # Start with positional arguments
+    resolved: list[Expr | None] = list(args) + [None] * len(kwargs)
+
+    # Track which parameters have been filled
+    filled: set[int] = set(range(len(args)))
+
+    # Process keyword arguments
+    for kwarg_name, kwarg_value in kwargs:
+      # Find the parameter index
+      try:
+        param_idx = sig.param_names.index(kwarg_name)
+      except ValueError:
+        raise TypeError(f"Unknown keyword argument '{kwarg_name}' for function '{func_name}'")
+
+      # Check for duplicate
+      if param_idx in filled:
+        raise TypeError(f"Duplicate argument for parameter '{kwarg_name}' in call to '{func_name}'")
+
+      resolved[param_idx] = kwarg_value
+      filled.add(param_idx)
+
+    # Verify all parameters are filled (should be guaranteed by count check, but be safe)
+    for i, expr in enumerate(resolved):
+      if expr is None:
+        raise TypeError(f"Missing argument for parameter '{sig.param_names[i]}' in call to '{func_name}'")
+
+    return resolved  # type: ignore
 
   def _maybe_move_var(self, name: str) -> None:
     """Mark a variable as moved if its type is not Copy."""
@@ -432,27 +478,31 @@ class TypeChecker:
       self.current_impl_type = impl.struct_name
       for method in impl.methods:
         ret_type = self._check_type_ann(method.return_type)
+        param_names: list[str] = []
         param_types: list[str] = []
         for param in method.params:
+          param_names.append(param.name)
           param_types.append(self._check_type_ann(param.type_ann))
 
         if method.name in self.struct_methods[impl.struct_name]:
           raise TypeError(f"Method '{method.name}' already defined for '{impl.struct_name}'")
 
-        self.struct_methods[impl.struct_name][method.name] = FunctionSignature(tuple(param_types), ret_type)
+        self.struct_methods[impl.struct_name][method.name] = FunctionSignature(tuple(param_names), tuple(param_types), ret_type)
       self.current_impl_type = None
 
     # Fourth pass: register all function signatures
     for func in program.functions:
       ret_type = self._check_type_ann(func.return_type)
+      param_names: list[str] = []
       param_types: list[str] = []
       for param in func.params:
+        param_names.append(param.name)
         param_types.append(self._check_type_ann(param.type_ann))
 
       if func.name in self.functions:
         raise TypeError(f"Function '{func.name}' already defined")
 
-      self.functions[func.name] = FunctionSignature(tuple(param_types), ret_type)
+      self.functions[func.name] = FunctionSignature(tuple(param_names), tuple(param_types), ret_type)
 
     # Check for main function
     if "main" not in self.functions:
@@ -791,12 +841,17 @@ class TypeChecker:
 
         raise TypeError(f"Unknown unary operator '{op}'")
 
-      case CallExpr(name, args):
+      case CallExpr(name, args, kwargs):
         # Special case: print accepts i64 or str
         if name == "print":
-          if len(args) != 1:
-            raise TypeError(f"print() expects 1 argument, got {len(args)}")
-          arg_type = self._check_expr(args[0])
+          total_args = len(args) + len(kwargs)
+          if total_args != 1:
+            raise TypeError(f"print() expects 1 argument, got {total_args}")
+          if kwargs:
+            _, arg = kwargs[0]
+          else:
+            arg = args[0]
+          arg_type = self._check_expr(arg)
           if arg_type not in ("i64", "str"):
             raise TypeError(f"print() expects i64 or str, got {arg_type}")
           return "i64"
@@ -804,7 +859,9 @@ class TypeChecker:
         # Check if it's a closure variable being called
         var_state = self._lookup_var_state(name)
         if var_state is not None and is_fn_type(var_state.type_str):
-          # It's a closure call
+          # It's a closure call - closures don't support kwargs for simplicity
+          if kwargs:
+            raise TypeError(f"Closure '{name}' does not support keyword arguments")
           self._check_not_moved(name)
           parsed = parse_fn_type(var_state.type_str)
           if parsed is None:
@@ -826,13 +883,14 @@ class TypeChecker:
 
         sig = self.functions[name]
 
-        if len(args) != len(sig.param_types):
-          raise TypeError(f"Function '{name}' expects {len(sig.param_types)} arguments, got {len(args)}")
+        # Resolve keyword arguments to positional order
+        resolved_args = self._resolve_kwargs(name, sig, args, kwargs)
 
-        for i, (arg, expected_type) in enumerate(zip(args, sig.param_types)):
+        for i, (arg, expected_type) in enumerate(zip(resolved_args, sig.param_types)):
           arg_type = self._check_expr(arg)
           if arg_type != expected_type:
-            raise TypeError(f"Argument {i + 1} of '{name}' expects {expected_type}, got {arg_type}")
+            param_name = sig.param_names[i]
+            raise TypeError(f"Argument '{param_name}' of '{name}' expects {expected_type}, got {arg_type}")
           # Mark variable as moved if passed by value (not a reference type param)
           if not is_ref_type(expected_type):
             match arg:
