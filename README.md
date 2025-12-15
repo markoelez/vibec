@@ -6,19 +6,42 @@ A toy compiled programming language with Python/Rust hybrid syntax, targeting AR
 
 ## Language Features
 
-Vibec combines the visual cleanliness of Python's indentation-based blocks with Rust's explicit type annotations:
+Vibec combines Python's indentation-based blocks with Rust's explicit type annotations:
 
 ```
+# Structs
+struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    # Variables and control flow
+    let p: Point = Point { x: 10, y: 20 }
+    p.x = 100
+
+    # Fixed-size arrays
+    let arr: [i64; 3] = [1, 2, 3]
+    let sum: i64 = arr[0] + arr[1] + arr[2]
+
+    # Dynamic vectors
+    let nums: vec[i64] = []
+    nums.push(42)
+    nums.push(nums.pop() * 2)
+
+    # For loops
+    for i in range(5):
+        print(i)
+
+    # Recursion, conditionals, arithmetic
+    return factorial(5)
+
 fn factorial(n: i64) -> i64:
     if n <= 1:
         return 1
     return n * factorial(n - 1)
-
-fn main() -> i64:
-    let result: i64 = factorial(5)
-    print(result)
-    return 0
 ```
+
+**Supported:** functions, structs, arrays `[T; N]`, vectors `vec[T]`, `if`/`else`, `while`, `for i in range()`, arithmetic, comparisons, logical ops, `print()`
 
 ## Architecture
 

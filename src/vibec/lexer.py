@@ -8,6 +8,8 @@ SIMPLE_TOKENS: dict[str, TokenType] = {
   ")": TokenType.RPAREN,
   "[": TokenType.LBRACKET,
   "]": TokenType.RBRACKET,
+  "{": TokenType.LBRACE,
+  "}": TokenType.RBRACE,
   ":": TokenType.COLON,
   ",": TokenType.COMMA,
   ";": TokenType.SEMICOLON,

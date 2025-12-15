@@ -8,6 +8,7 @@ class TokenType(Enum):
   # Keywords
   FN = auto()
   LET = auto()
+  STRUCT = auto()
   IF = auto()
   ELSE = auto()
   WHILE = auto()
@@ -33,6 +34,8 @@ class TokenType(Enum):
   RPAREN = auto()
   LBRACKET = auto()
   RBRACKET = auto()
+  LBRACE = auto()
+  RBRACE = auto()
   COMMA = auto()
   SEMICOLON = auto()
   DOT = auto()
@@ -67,6 +70,7 @@ class TokenType(Enum):
 KEYWORDS: dict[str, TokenType] = {
   "fn": TokenType.FN,
   "let": TokenType.LET,
+  "struct": TokenType.STRUCT,
   "if": TokenType.IF,
   "else": TokenType.ELSE,
   "while": TokenType.WHILE,

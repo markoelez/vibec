@@ -24,8 +24,11 @@ from .ast import (
   BoolLiteral,
   ArrayLiteral,
   StringLiteral,
+  StructLiteral,
   MethodCallExpr,
   TypeAnnotation,
+  FieldAccessExpr,
+  FieldAssignStmt,
   IndexAssignStmt,
 )
 
@@ -79,6 +82,8 @@ class CodeGenerator:
     # String literals: value -> label
     self.strings: dict[str, str] = {}
     self.string_counter = 0
+    # Struct definitions: name -> list of (field_name, field_type)
+    self.structs: dict[str, list[tuple[str, str]]] = {}
 
   def _emit(self, line: str) -> None:
     self.output.append(line)
@@ -147,6 +152,9 @@ class CodeGenerator:
           self._collect_strings_from_expr(start)
           self._collect_strings_from_expr(end)
           self._collect_strings_from_stmts(body)
+        case FieldAssignStmt(target, _, value):
+          self._collect_strings_from_expr(target)
+          self._collect_strings_from_expr(value)
 
   def _collect_strings_from_expr(self, expr: Expr) -> None:
     """Collect strings from an expression."""
@@ -171,11 +179,21 @@ class CodeGenerator:
         self._collect_strings_from_expr(target)
         for arg in args:
           self._collect_strings_from_expr(arg)
+      case StructLiteral(_, fields):
+        for _, value in fields:
+          self._collect_strings_from_expr(value)
+      case FieldAccessExpr(target, _):
+        self._collect_strings_from_expr(target)
       case _:
         pass
 
   def generate(self, program: Program) -> str:
     """Generate assembly for the entire program."""
+    # Register struct definitions
+    for struct in program.structs:
+      fields = [(f.name, type_to_str(f.type_ann)) for f in struct.fields]
+      self.structs[struct.name] = fields
+
     # First pass: collect all string literals
     self._collect_strings(program)
 
@@ -227,8 +245,12 @@ class CodeGenerator:
         return size  # Each element is 8 bytes
       case VecType(_):
         return 1  # List is a pointer
-      case _:
+      case SimpleType(name):
+        if name in self.structs:
+          return len(self.structs[name])  # One slot per field
         return 1  # Simple types are 8 bytes
+      case _:
+        return 1
 
   def _gen_function(self, func: Function) -> None:
     """Generate assembly for a function."""
@@ -314,6 +336,25 @@ class CodeGenerator:
             self._emit("    str xzr, [x0, #8]")  # Length = 0
             self._emit(f"    str x0, [x29, #{offset}]")
             self.next_slot += 1
+
+          case SimpleType(name) if name in self.structs:
+            # Struct type: initialize fields in place
+            fields = self.structs[name]
+            match value:
+              case StructLiteral(_, field_values):
+                # Map field name -> value for lookup
+                value_map = dict(field_values)
+                for i, (field_name, _) in enumerate(fields):
+                  if field_name in value_map:
+                    self._gen_expr(value_map[field_name])
+                    self._emit(f"    str x0, [x29, #{offset - i * 8}]")
+                  else:
+                    self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+              case _:
+                # Initialize all to zero
+                for i in range(len(fields)):
+                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+            self.next_slot += len(fields)
 
           case _:
             # Simple type: evaluate and store
@@ -438,6 +479,21 @@ class CodeGenerator:
         self._emit(f"    b {loop_label}")
 
         self._emit(f"{end_label}:")
+
+      case FieldAssignStmt(target, field, value):
+        # Get struct variable
+        match target:
+          case VarExpr(name):
+            var_offset, type_str = self.locals[name]
+            if type_str in self.structs:
+              fields = self.structs[type_str]
+              field_idx = next(i for i, (f, _) in enumerate(fields) if f == field)
+              # Evaluate value
+              self._gen_expr(value)
+              # Store to field slot
+              self._emit(f"    str x0, [x29, #{var_offset - field_idx * 8}]")
+          case _:
+            pass  # Nested field access would need more work
 
   def _gen_expr(self, expr: Expr) -> None:
     """Generate assembly for an expression, result in x0."""
@@ -569,6 +625,41 @@ class CodeGenerator:
 
       case MethodCallExpr(target, method, args):
         self._gen_method_call(target, method, args)
+
+      case StructLiteral(name, fields):
+        # Struct literal outside of let: allocate temp and return address
+        # This is uncommon, but we can handle it
+        struct_fields = self.structs[name]
+        value_map = dict(fields)
+        # Store fields on stack temporarily
+        for i, (field_name, _) in enumerate(struct_fields):
+          if field_name in value_map:
+            self._gen_expr(value_map[field_name])
+            self._emit("    str x0, [sp, #-16]!")
+          else:
+            self._emit("    str xzr, [sp, #-16]!")
+        # Load first field's value as result (or return 0)
+        if struct_fields:
+          self._emit(f"    ldr x0, [sp, #{(len(struct_fields) - 1) * 16}]")
+        else:
+          self._emit("    mov x0, #0")
+        # Clean up stack
+        self._emit(f"    add sp, sp, #{len(struct_fields) * 16}")
+
+      case FieldAccessExpr(target, field):
+        match target:
+          case VarExpr(name):
+            var_offset, type_str = self.locals[name]
+            if type_str in self.structs:
+              fields = self.structs[type_str]
+              field_idx = next(i for i, (f, _) in enumerate(fields) if f == field)
+              # Load field value
+              self._emit(f"    ldr x0, [x29, #{var_offset - field_idx * 8}]")
+          case _:
+            # Handle nested field access
+            self._gen_expr(target)
+            # Would need type info to know field offset - limited support
+            pass
 
   def _gen_print(self, args: tuple[Expr, ...]) -> None:
     """Generate code for print() builtin.

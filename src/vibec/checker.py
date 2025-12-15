@@ -26,8 +26,11 @@ from .ast import (
   BoolLiteral,
   ArrayLiteral,
   StringLiteral,
+  StructLiteral,
   MethodCallExpr,
   TypeAnnotation,
+  FieldAccessExpr,
+  FieldAssignStmt,
   IndexAssignStmt,
 )
 
@@ -79,6 +82,13 @@ def is_vec_type(type_str: str) -> bool:
   return type_str.startswith("vec[")
 
 
+@dataclass
+class StructInfo:
+  """Stores a struct's field information."""
+
+  fields: dict[str, str]  # field_name -> field_type
+
+
 class TypeChecker:
   """Single-pass type checker with scoped symbol tables."""
 
@@ -88,6 +98,8 @@ class TypeChecker:
   }
 
   def __init__(self) -> None:
+    # Struct definitions: name -> StructInfo
+    self.structs: dict[str, StructInfo] = {}
     # Function signatures: name -> signature
     self.functions: dict[str, FunctionSignature] = dict(self.BUILTINS)
     # Variable scopes: list of (name -> type) dicts
@@ -116,9 +128,11 @@ class TypeChecker:
     """Verify type annotation is valid and return canonical string."""
     match t:
       case SimpleType(name):
-        if name not in ("i64", "bool", "str"):
-          raise TypeError(f"Unknown type '{name}'")
-        return name
+        if name in ("i64", "bool", "str"):
+          return name
+        if name in self.structs:
+          return name  # Struct type
+        raise TypeError(f"Unknown type '{name}'")
       case ArrayType(elem, size):
         if size <= 0:
           raise TypeError("Array size must be positive")
@@ -131,7 +145,23 @@ class TypeChecker:
 
   def check(self, program: Program) -> None:
     """Type check an entire program."""
-    # First pass: register all function signatures
+    # First pass: register all struct definitions
+    for struct in program.structs:
+      if struct.name in self.structs:
+        raise TypeError(f"Struct '{struct.name}' already defined")
+      self.structs[struct.name] = StructInfo({})  # Placeholder
+
+    # Second pass: check struct field types (allows recursive/mutual refs)
+    for struct in program.structs:
+      fields: dict[str, str] = {}
+      for field in struct.fields:
+        field_type = self._check_type_ann(field.type_ann)
+        if field.name in fields:
+          raise TypeError(f"Duplicate field '{field.name}' in struct '{struct.name}'")
+        fields[field.name] = field_type
+      self.structs[struct.name] = StructInfo(fields)
+
+    # Third pass: register all function signatures
     for func in program.functions:
       ret_type = self._check_type_ann(func.return_type)
       param_types: list[str] = []
@@ -147,7 +177,7 @@ class TypeChecker:
     if "main" not in self.functions:
       raise TypeError("No 'main' function defined")
 
-    # Second pass: check function bodies
+    # Fourth pass: check function bodies
     for func in program.functions:
       self._check_function(func)
 
@@ -251,6 +281,18 @@ class TypeChecker:
           self._check_stmt(s)
         self._exit_scope()
 
+      case FieldAssignStmt(target, field, value):
+        target_type = self._check_expr(target)
+        if target_type not in self.structs:
+          raise TypeError(f"Cannot access field of non-struct type {target_type}")
+        struct_info = self.structs[target_type]
+        if field not in struct_info.fields:
+          raise TypeError(f"Struct '{target_type}' has no field '{field}'")
+        field_type = struct_info.fields[field]
+        value_type = self._check_expr(value)
+        if value_type != field_type:
+          raise TypeError(f"Cannot assign {value_type} to field of type {field_type}")
+
   def _check_expr(self, expr: Expr) -> str:
     """Type check an expression and return its type."""
     match expr:
@@ -289,6 +331,36 @@ class TypeChecker:
       case MethodCallExpr(target, method, args):
         target_type = self._check_expr(target)
         return self._check_method_call(target_type, method, args)
+
+      case StructLiteral(name, fields):
+        if name not in self.structs:
+          raise TypeError(f"Unknown struct '{name}'")
+        struct_info = self.structs[name]
+        provided_fields: set[str] = set()
+        for field_name, field_value in fields:
+          if field_name in provided_fields:
+            raise TypeError(f"Duplicate field '{field_name}' in struct literal")
+          provided_fields.add(field_name)
+          if field_name not in struct_info.fields:
+            raise TypeError(f"Struct '{name}' has no field '{field_name}'")
+          expected_type = struct_info.fields[field_name]
+          actual_type = self._check_expr(field_value)
+          if actual_type != expected_type:
+            raise TypeError(f"Field '{field_name}' expects {expected_type}, got {actual_type}")
+        # Check all required fields are provided
+        missing = set(struct_info.fields.keys()) - provided_fields
+        if missing:
+          raise TypeError(f"Missing fields in struct literal: {', '.join(sorted(missing))}")
+        return name
+
+      case FieldAccessExpr(target, field):
+        target_type = self._check_expr(target)
+        if target_type not in self.structs:
+          raise TypeError(f"Cannot access field of non-struct type {target_type}")
+        struct_info = self.structs[target_type]
+        if field not in struct_info.fields:
+          raise TypeError(f"Struct '{target_type}' has no field '{field}'")
+        return struct_info.fields[field]
 
       case BinaryExpr(left, op, right):
         left_type = self._check_expr(left)

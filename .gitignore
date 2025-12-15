@@ -19,6 +19,7 @@ examples/strings
 examples/loops
 examples/counter
 examples/collections
+examples/structs
 
 # uv lock file
 uv.lock

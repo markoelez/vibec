@@ -111,8 +111,37 @@ class MethodCallExpr:
   args: tuple["Expr", ...]
 
 
+@dataclass(frozen=True, slots=True)
+class StructLiteral:
+  """Struct literal like Point { x: 10, y: 20 }."""
+
+  name: str
+  fields: tuple[tuple[str, "Expr"], ...]  # (field_name, value) pairs
+
+
+@dataclass(frozen=True, slots=True)
+class FieldAccessExpr:
+  """Field access like p.x."""
+
+  target: "Expr"
+  field: str
+
+
 # Expression union type
-Expr = IntLiteral | BoolLiteral | StringLiteral | VarExpr | BinaryExpr | UnaryExpr | CallExpr | ArrayLiteral | IndexExpr | MethodCallExpr
+Expr = (
+  IntLiteral
+  | BoolLiteral
+  | StringLiteral
+  | VarExpr
+  | BinaryExpr
+  | UnaryExpr
+  | CallExpr
+  | ArrayLiteral
+  | IndexExpr
+  | MethodCallExpr
+  | StructLiteral
+  | FieldAccessExpr
+)
 
 
 # === Statements ===
@@ -185,8 +214,17 @@ class ForStmt:
   body: tuple["Stmt", ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FieldAssignStmt:
+  """Field assignment: p.x = 10"""
+
+  target: Expr
+  field: str
+  value: Expr
+
+
 # Statement union type
-Stmt = LetStmt | AssignStmt | IndexAssignStmt | ReturnStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
+Stmt = LetStmt | AssignStmt | IndexAssignStmt | FieldAssignStmt | ReturnStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
 
 
 # === Top-level Definitions ===
@@ -211,7 +249,24 @@ class Function:
 
 
 @dataclass(frozen=True, slots=True)
-class Program:
-  """Root node containing all functions."""
+class StructField:
+  """Field in a struct definition."""
 
+  name: str
+  type_ann: TypeAnnotation
+
+
+@dataclass(frozen=True, slots=True)
+class StructDef:
+  """Struct definition: struct Point: x: i64, y: i64"""
+
+  name: str
+  fields: tuple[StructField, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Program:
+  """Root node containing structs and functions."""
+
+  structs: tuple[StructDef, ...]
   functions: tuple[Function, ...]

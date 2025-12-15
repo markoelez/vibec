@@ -15,6 +15,7 @@ from .ast import (
   ArrayType,
   IndexExpr,
   Parameter,
+  StructDef,
   UnaryExpr,
   WhileStmt,
   AssignStmt,
@@ -23,10 +24,14 @@ from .ast import (
   ReturnStmt,
   SimpleType,
   BoolLiteral,
+  StructField,
   ArrayLiteral,
   StringLiteral,
+  StructLiteral,
   MethodCallExpr,
   TypeAnnotation,
+  FieldAccessExpr,
+  FieldAssignStmt,
   IndexAssignStmt,
 )
 from .tokens import Token, TokenType
@@ -116,14 +121,42 @@ class Parser:
 
   def parse(self) -> Program:
     """Parse the entire program."""
+    structs: list[StructDef] = []
     functions: list[Function] = []
     self._skip_newlines()
 
     while not self._at_end():
-      functions.append(self._parse_function())
+      if self._check(TokenType.STRUCT):
+        structs.append(self._parse_struct())
+      elif self._check(TokenType.FN):
+        functions.append(self._parse_function())
+      else:
+        raise ParseError("Expected 'struct' or 'fn'", self._current())
       self._skip_newlines()
 
-    return Program(tuple(functions))
+    return Program(tuple(structs), tuple(functions))
+
+  def _parse_struct(self) -> StructDef:
+    """Parse: struct Name: INDENT field: type ... DEDENT"""
+    self._expect(TokenType.STRUCT, "Expected 'struct'")
+    name_token = self._expect(TokenType.IDENT, "Expected struct name")
+    self._expect(TokenType.COLON, "Expected ':'")
+    self._expect(TokenType.NEWLINE, "Expected newline after ':'")
+    self._expect(TokenType.INDENT, "Expected indented block")
+
+    fields: list[StructField] = []
+    while not self._check(TokenType.DEDENT, TokenType.EOF):
+      self._skip_newlines()
+      if self._check(TokenType.DEDENT, TokenType.EOF):
+        break
+      field_name = self._expect(TokenType.IDENT, "Expected field name")
+      self._expect(TokenType.COLON, "Expected ':'")
+      field_type = self._parse_type()
+      self._expect(TokenType.NEWLINE, "Expected newline after field")
+      fields.append(StructField(field_name.value, field_type))
+
+    self._expect(TokenType.DEDENT, "Expected dedent")
+    return StructDef(name_token.value, tuple(fields))
 
   def _parse_function(self) -> Function:
     """Parse: fn name(params) -> type: INDENT body DEDENT"""
@@ -217,25 +250,29 @@ class Parser:
     elif self._check(TokenType.FOR):
       return self._parse_for()
     elif self._check(TokenType.IDENT):
-      # Could be: assignment, index assignment, or expression statement
-      # Look ahead to determine which
+      # Could be: assignment, index/field assignment, or expression statement
       if self._peek().type == TokenType.ASSIGN:
         return self._parse_assign()
-      elif self._peek().type == TokenType.LBRACKET:
-        return self._parse_index_assign_or_expr()
+      elif self._peek().type in (TokenType.LBRACKET, TokenType.DOT):
+        return self._parse_complex_assign_or_expr()
       else:
         return self._parse_expr_stmt()
     else:
       return self._parse_expr_stmt()
 
-  def _parse_index_assign_or_expr(self) -> Stmt:
-    """Parse index assignment (arr[i] = x) or expression statement."""
+  def _parse_complex_assign_or_expr(self) -> Stmt:
+    """Parse index/field assignment or expression statement."""
     expr = self._parse_expression()
-    if self._check(TokenType.ASSIGN) and isinstance(expr, IndexExpr):
+    if self._check(TokenType.ASSIGN):
       self._advance()  # consume '='
       value = self._parse_expression()
       self._expect(TokenType.NEWLINE, "Expected newline after assignment")
-      return IndexAssignStmt(expr.target, expr.index, value)
+      if isinstance(expr, IndexExpr):
+        return IndexAssignStmt(expr.target, expr.index, value)
+      elif isinstance(expr, FieldAccessExpr):
+        return FieldAssignStmt(expr.target, expr.field, value)
+      else:
+        raise ParseError("Invalid assignment target", self._current())
     self._expect(TokenType.NEWLINE, "Expected newline after expression")
     return ExprStmt(expr)
 
@@ -394,10 +431,13 @@ class Parser:
         args = self._parse_arguments()
         self._expect(TokenType.RPAREN, "Expected ')'")
         expr: Expr = CallExpr(name, tuple(args))
+      # Check if it's a struct literal: Name { field: value, ... }
+      elif self._check(TokenType.LBRACE):
+        expr = self._parse_struct_literal(name)
       else:
         expr = VarExpr(name)
 
-      # Handle postfix operations: indexing and method calls
+      # Handle postfix operations: indexing, field access, method calls
       return self._parse_postfix(expr)
 
     elif token.type == TokenType.LPAREN:
@@ -410,7 +450,7 @@ class Parser:
       raise ParseError(f"Unexpected token '{token.value}'", token)
 
   def _parse_postfix(self, expr: Expr) -> Expr:
-    """Parse postfix operations: indexing [i] and method calls .method()."""
+    """Parse postfix operations: indexing [i], field access .field, method calls .method()."""
     while True:
       if self._check(TokenType.LBRACKET):
         # Index expression: expr[index]
@@ -419,16 +459,44 @@ class Parser:
         self._expect(TokenType.RBRACKET, "Expected ']'")
         expr = IndexExpr(expr, index)
       elif self._check(TokenType.DOT):
-        # Method call: expr.method(args)
+        # Field access or method call
         self._advance()
-        method_token = self._expect(TokenType.IDENT, "Expected method name")
-        self._expect(TokenType.LPAREN, "Expected '('")
-        args = self._parse_arguments()
-        self._expect(TokenType.RPAREN, "Expected ')'")
-        expr = MethodCallExpr(expr, method_token.value, tuple(args))
+        member_token = self._expect(TokenType.IDENT, "Expected field or method name")
+        if self._check(TokenType.LPAREN):
+          # Method call: expr.method(args)
+          self._advance()
+          args = self._parse_arguments()
+          self._expect(TokenType.RPAREN, "Expected ')'")
+          expr = MethodCallExpr(expr, member_token.value, tuple(args))
+        else:
+          # Field access: expr.field
+          expr = FieldAccessExpr(expr, member_token.value)
       else:
         break
     return expr
+
+  def _parse_struct_literal(self, name: str) -> StructLiteral:
+    """Parse struct literal: Name { field: value, ... }."""
+    self._expect(TokenType.LBRACE, "Expected '{'")
+    fields: list[tuple[str, Expr]] = []
+
+    if not self._check(TokenType.RBRACE):
+      field_name = self._expect(TokenType.IDENT, "Expected field name")
+      self._expect(TokenType.COLON, "Expected ':'")
+      field_value = self._parse_expression()
+      fields.append((field_name.value, field_value))
+
+      while self._check(TokenType.COMMA):
+        self._advance()
+        if self._check(TokenType.RBRACE):
+          break  # Allow trailing comma
+        field_name = self._expect(TokenType.IDENT, "Expected field name")
+        self._expect(TokenType.COLON, "Expected ':'")
+        field_value = self._parse_expression()
+        fields.append((field_name.value, field_value))
+
+    self._expect(TokenType.RBRACE, "Expected '}'")
+    return StructLiteral(name, tuple(fields))
 
   def _parse_array_literal(self) -> ArrayLiteral:
     """Parse array literal: [expr, expr, ...]."""

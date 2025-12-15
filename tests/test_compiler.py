@@ -60,11 +60,12 @@ class TestLexer:
     assert TokenType.GE in types
 
   def test_keywords(self):
-    source = "fn let if else while for in range return and or not true false"
+    source = "fn let struct if else while for in range return and or not true false"
     tokens = tokenize(source)
     types = [t.type for t in tokens]
     assert TokenType.FN in types
     assert TokenType.LET in types
+    assert TokenType.STRUCT in types
     assert TokenType.IF in types
     assert TokenType.ELSE in types
     assert TokenType.WHILE in types
@@ -78,6 +79,13 @@ class TestLexer:
     assert TokenType.TRUE in types
     assert TokenType.FALSE in types
 
+  def test_braces(self):
+    source = "{ }"
+    tokens = tokenize(source)
+    types = [t.type for t in tokens]
+    assert TokenType.LBRACE in types
+    assert TokenType.RBRACE in types
+
   def test_string_literal(self):
     source = '"hello world"'
     tokens = tokenize(source)
@@ -89,6 +97,35 @@ class TestLexer:
     tokens = tokenize(source)
     assert tokens[0].type == TokenType.STRING
     assert tokens[0].value == "line1\nline2\ttab\\"
+
+  def test_comment_line(self):
+    source = """# this is a comment
+fn main() -> i64:
+    return 42
+"""
+    tokens = tokenize(source)
+    # Comment should be skipped, first token should be FN
+    assert tokens[0].type == TokenType.FN
+
+  def test_comment_after_code(self):
+    source = """fn main() -> i64:
+    return 42  # inline comment
+"""
+    tokens = tokenize(source)
+    # Should parse correctly, comment ignored
+    types = [t.type for t in tokens]
+    assert TokenType.RETURN in types
+    assert TokenType.INT in types
+
+  def test_comment_only_lines(self):
+    source = """fn main() -> i64:
+    # comment line 1
+    # comment line 2
+    return 0
+"""
+    tokens = tokenize(source)
+    types = [t.type for t in tokens]
+    assert TokenType.RETURN in types
 
 
 class TestParser:
@@ -260,6 +297,63 @@ class TestParser:
     assert isinstance(stmt.expr, MethodCallExpr)
     assert stmt.expr.method == "push"
 
+  def test_struct_definition(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import StructDef
+
+    assert len(ast.structs) == 1
+    struct = ast.structs[0]
+    assert isinstance(struct, StructDef)
+    assert struct.name == "Point"
+    assert len(struct.fields) == 2
+    assert struct.fields[0].name == "x"
+    assert struct.fields[1].name == "y"
+
+  def test_struct_literal(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10, y: 20 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import LetStmt, StructLiteral
+
+    stmt = ast.functions[0].body[0]
+    assert isinstance(stmt, LetStmt)
+    assert isinstance(stmt.value, StructLiteral)
+    assert stmt.value.name == "Point"
+    assert len(stmt.value.fields) == 2
+
+  def test_field_access(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10, y: 20 }
+    return p.x
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.ast import ReturnStmt, FieldAccessExpr
+
+    stmt = ast.functions[0].body[1]
+    assert isinstance(stmt, ReturnStmt)
+    assert isinstance(stmt.value, FieldAccessExpr)
+    assert stmt.value.field == "x"
+
 
 class TestChecker:
   def test_type_mismatch(self):
@@ -396,6 +490,79 @@ class TestChecker:
     with pytest.raises(TypeError):
       check(ast)
 
+  def test_struct_valid(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10, y: 20 }
+    return p.x
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
+  def test_struct_missing_field(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_struct_unknown_field(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10, y: 20, z: 30 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_struct_field_type_mismatch(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: true, y: 20 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
+  def test_struct_undefined(self):
+    source = """fn main() -> i64:
+    let p: Unknown = Unknown { x: 10 }
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError):
+      check(ast)
+
 
 class TestCodegen:
   def test_generates_assembly(self):
@@ -444,6 +611,42 @@ class TestEndToEnd:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 14  # 2 + (3 * 4) = 14
+
+  def test_arithmetic_subtraction(self):
+    source = """fn main() -> i64:
+    return 10 - 3
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 7
+
+  def test_arithmetic_division(self):
+    source = """fn main() -> i64:
+    return 20 / 4
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 5
+
+  def test_arithmetic_modulo(self):
+    source = """fn main() -> i64:
+    return 17 % 5
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 2
+
+  def test_arithmetic_precedence(self):
+    source = """fn main() -> i64:
+    return 2 + 3 * 4 - 8 / 2
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 10  # 2 + 12 - 4 = 10
+
+  def test_arithmetic_unary_minus(self):
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    return -x + 10
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 5
 
   def test_print(self):
     source = """fn main() -> i64:
@@ -662,3 +865,68 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 100
+
+  def test_struct_basic(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 10, y: 20 }
+    return p.x + p.y
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_struct_field_assign(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn main() -> i64:
+    let p: Point = Point { x: 5, y: 10 }
+    p.x = 100
+    return p.x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 100
+
+  def test_struct_multiple_fields(self):
+    source = """struct Rectangle:
+    x: i64
+    y: i64
+    width: i64
+    height: i64
+
+fn main() -> i64:
+    let r: Rectangle = Rectangle { x: 0, y: 0, width: 10, height: 5 }
+    return r.width * r.height
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 50
+
+  def test_struct_pass_to_function(self):
+    source = """struct Point:
+    x: i64
+    y: i64
+
+fn sum_coords(px: i64, py: i64) -> i64:
+    return px + py
+
+fn main() -> i64:
+    let p: Point = Point { x: 15, y: 25 }
+    return sum_coords(p.x, p.y)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 40
+
+  def test_comments(self):
+    source = """# This is a comment at the top
+fn main() -> i64:
+    # Comment inside function
+    let x: i64 = 10  # Inline comment
+    # Another comment
+    return x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 10
