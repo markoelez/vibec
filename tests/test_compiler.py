@@ -4511,3 +4511,195 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 38  # (5+3) + 10 + 20 = 8 + 30 = 38
+
+  # === Option? Operator Tests ===
+
+  def test_option_try_some(self):
+    """Test ? operator on Option unwraps Some."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn get_value(opt: Option<i64>) -> Option<i64>:
+    let value: i64 = opt?
+    Option<i64>::Some(value + 10)
+
+fn main() -> i64:
+    let some_val: Option<i64> = Option<i64>::Some(32)
+    let result: Option<i64> = get_value(some_val)
+    match result:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42  # 32 + 10
+
+  def test_option_try_none_propagates(self):
+    """Test ? operator on None returns None early."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn get_value(opt: Option<i64>) -> Option<i64>:
+    let value: i64 = opt?
+    Option<i64>::Some(value + 10)
+
+fn main() -> i64:
+    let none_val: Option<i64> = Option<i64>::None
+    let result: Option<i64> = get_value(none_val)
+    match result:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            99
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 99  # None propagated
+
+  def test_option_try_chained(self):
+    """Test chained ? operators on Option."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn get_opt(x: i64) -> Option<i64>:
+    if x > 0:
+        Option<i64>::Some(x)
+    else:
+        Option<i64>::None
+
+fn chain(a: i64, b: i64) -> Option<i64>:
+    let x: i64 = get_opt(a)?
+    let y: i64 = get_opt(b)?
+    Option<i64>::Some(x + y)
+
+fn main() -> i64:
+    let r1: Option<i64> = chain(10, 20)
+    match r1:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30  # 10 + 20
+
+  def test_option_try_chain_fails_first(self):
+    """Test chained ? where first fails."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn get_opt(x: i64) -> Option<i64>:
+    if x > 0:
+        Option<i64>::Some(x)
+    else:
+        Option<i64>::None
+
+fn chain(a: i64, b: i64) -> Option<i64>:
+    let x: i64 = get_opt(a)?
+    let y: i64 = get_opt(b)?
+    Option<i64>::Some(x + y)
+
+fn main() -> i64:
+    let r1: Option<i64> = chain(-5, 20)
+    match r1:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            88
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 88  # First ? failed
+
+  def test_option_try_chain_fails_second(self):
+    """Test chained ? where second fails."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn get_opt(x: i64) -> Option<i64>:
+    if x > 0:
+        Option<i64>::Some(x)
+    else:
+        Option<i64>::None
+
+fn chain(a: i64, b: i64) -> Option<i64>:
+    let x: i64 = get_opt(a)?
+    let y: i64 = get_opt(b)?
+    Option<i64>::Some(x + y)
+
+fn main() -> i64:
+    let r1: Option<i64> = chain(10, -5)
+    match r1:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            77
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 77  # Second ? failed
+
+  def test_option_try_with_variable(self):
+    """Test ? operator on Option stored in a variable."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn process(opt: Option<i64>) -> Option<i64>:
+    let val: i64 = opt?
+    Option<i64>::Some(val * 2)
+
+fn main() -> i64:
+    let opt: Option<i64> = Option<i64>::Some(21)
+    let res: Option<i64> = process(opt)
+    match res:
+        Option<i64>::Some(v):
+            v
+        Option<i64>::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42  # 21 * 2
+
+  def test_option_try_type_mismatch_error(self):
+    """Test ? operator error when function doesn't return Option."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn bad(opt: Option<i64>) -> i64:
+    let val: i64 = opt?
+    val
+
+fn main() -> i64:
+    0
+"""
+    from vibec.checker import TypeError as CheckerTypeError
+
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    with pytest.raises(CheckerTypeError, match="requires function to return Option"):
+      check(ast)
+
+  def test_option_try_inner_type_mismatch_error(self):
+    """Test ? operator error when Option inner types don't match."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn bad(opt: Option<i64>) -> Option<bool>:
+    let val: i64 = opt?
+    Option<bool>::Some(true)
+
+fn main() -> i64:
+    0
+"""
+    from vibec.checker import TypeError as CheckerTypeError
+
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    with pytest.raises(CheckerTypeError, match="mismatch"):
+      check(ast)

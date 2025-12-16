@@ -321,6 +321,27 @@ def result_types_compatible(actual: str, expected: str) -> bool:
   return ok_match and err_match
 
 
+def is_option_type(type_str: str) -> bool:
+  """Check if type string represents an Option type (e.g., Option<i64>)."""
+  return type_str.startswith("Option<") and type_str.endswith(">")
+
+
+def get_option_inner_type(type_str: str) -> str | None:
+  """Extract inner type from Option type string like Option<i64> -> i64."""
+  if not is_option_type(type_str):
+    return None
+  return type_str[7:-1]  # Remove "Option<" and ">"
+
+
+def option_types_compatible(actual: str, expected: str) -> bool:
+  """Check if actual Option type is compatible with expected Option type."""
+  if not is_option_type(actual) or not is_option_type(expected):
+    return False
+  actual_inner = get_option_inner_type(actual)
+  expected_inner = get_option_inner_type(expected)
+  return actual_inner == expected_inner
+
+
 @dataclass
 class StructInfo:
   """Stores a struct's field information."""
@@ -413,6 +434,8 @@ class TypeChecker:
     self.inferred_calls: dict[int, str] = {}
     # Operator overloads: id(BinaryExpr) -> (left_type, right_type, method_name, return_type)
     self.operator_overloads: dict[int, tuple[str, str, str, str]] = {}
+    # Try expression types: id(TryExpr) -> "option" or "result"
+    self.try_expr_types: dict[int, str] = {}
 
   def _resolve_generic_struct(self, name: str, type_args: tuple[TypeAnnotation, ...]) -> str:
     """Resolve a generic struct instantiation to its monomorphized name."""
@@ -2030,25 +2053,49 @@ class TypeChecker:
         return f"Result[?,{value_type}]"
 
       case TryExpr(target):
-        # expr? - unwraps Ok or returns early with Err
+        # expr? - unwraps Some/Ok or returns early with None/Err
         target_type = self._check_expr(target)
-        if not is_result_type(target_type):
-          raise TypeError(f"The '?' operator can only be used on Result types, got {target_type}")
-        # Verify current function returns a compatible Result type
-        if self.current_return_type is None:
-          raise TypeError("The '?' operator can only be used inside a function")
-        if not is_result_type(self.current_return_type):
-          raise TypeError(f"The '?' operator requires function to return Result, but returns {self.current_return_type}")
-        # Check error types are compatible
-        expr_err_type = get_result_err_type(target_type)
-        func_err_type = get_result_err_type(self.current_return_type)
-        if expr_err_type != func_err_type:
-          raise TypeError(f"Error type mismatch: expression has {expr_err_type}, function returns {func_err_type}")
-        # Return the Ok type (unwrapped)
-        ok_type = get_result_ok_type(target_type)
-        if ok_type is None:
-          raise TypeError(f"Invalid Result type: {target_type}")
-        return ok_type
+
+        # Handle Option types
+        if is_option_type(target_type):
+          # Verify current function returns a compatible Option type
+          if self.current_return_type is None:
+            raise TypeError("The '?' operator can only be used inside a function")
+          if not is_option_type(self.current_return_type):
+            raise TypeError(f"The '?' operator on Option requires function to return Option, but returns {self.current_return_type}")
+          # Check inner types are compatible
+          expr_inner = get_option_inner_type(target_type)
+          func_inner = get_option_inner_type(self.current_return_type)
+          if expr_inner != func_inner:
+            raise TypeError(f"Option type mismatch: expression has Option<{expr_inner}>, function returns Option<{func_inner}>")
+          # Return the inner type (unwrapped)
+          if expr_inner is None:
+            raise TypeError(f"Invalid Option type: {target_type}")
+          # Record this is an Option try expression for codegen
+          self.try_expr_types[id(expr)] = "option"
+          return expr_inner
+
+        # Handle Result types
+        if is_result_type(target_type):
+          # Verify current function returns a compatible Result type
+          if self.current_return_type is None:
+            raise TypeError("The '?' operator can only be used inside a function")
+          if not is_result_type(self.current_return_type):
+            raise TypeError(f"The '?' operator on Result requires function to return Result, but returns {self.current_return_type}")
+          # Check error types are compatible
+          expr_err_type = get_result_err_type(target_type)
+          func_err_type = get_result_err_type(self.current_return_type)
+          if expr_err_type != func_err_type:
+            raise TypeError(f"Error type mismatch: expression has {expr_err_type}, function returns {func_err_type}")
+          # Return the Ok type (unwrapped)
+          ok_type = get_result_ok_type(target_type)
+          if ok_type is None:
+            raise TypeError(f"Invalid Result type: {target_type}")
+          # Record this is a Result try expression for codegen
+          self.try_expr_types[id(expr)] = "result"
+          return ok_type
+
+        raise TypeError(f"The '?' operator can only be used on Option or Result types, got {target_type}")
 
       case ListComprehension(element_expr, var_name, start, end, condition):
         # [expr for var in range(start, end) if condition]
@@ -2710,6 +2757,8 @@ class TypeCheckResult:
   instantiated_methods: dict[str, InstantiatedMethod]
   # Operator overloads: id(BinaryExpr) -> (left_type, right_type, method_name, return_type)
   operator_overloads: dict[int, tuple[str, str, str, str]]
+  # Try expression types: id(TryExpr) -> "option" or "result"
+  try_expr_types: dict[int, str]
 
 
 def check(program: Program) -> tuple[Program, TypeCheckResult]:
@@ -2747,6 +2796,7 @@ def check(program: Program) -> tuple[Program, TypeCheckResult]:
     checker.instantiated_functions,
     checker.instantiated_methods,
     checker.operator_overloads,
+    checker.try_expr_types,
   )
 
   return transformed_program, type_check_result

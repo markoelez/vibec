@@ -197,6 +197,8 @@ class CodeGenerator:
     self.function_params: dict[str, list[str]] = {}
     # Operator overloads: id(BinaryExpr) -> (left_type, right_type, method_name, return_type)
     self.operator_overloads: dict[int, tuple[str, str, str, str]] = {}
+    # Try expression types: id(TryExpr) -> "option" or "result"
+    self.try_expr_types: dict[int, str] = {}
 
   def _emit(self, line: str) -> None:
     self.output.append(line)
@@ -423,6 +425,10 @@ class CodeGenerator:
     # Register operator overloads from type checker
     if type_check_result:
       self.operator_overloads = type_check_result.operator_overloads
+
+    # Register try expression types from type checker
+    if type_check_result:
+      self.try_expr_types = type_check_result.try_expr_types
 
     # Register function parameter names (for kwargs resolution) - skip generic functions
     for func in program.functions:
@@ -973,8 +979,11 @@ class CodeGenerator:
               else:
                 self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Zero payload
             case _:
-              self._emit(f"    str xzr, [x29, #{offset}]")  # Tag = 0
-              self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Payload = 0
+              # Expression that returns an enum (e.g., function call)
+              self._gen_expr(value)
+              # x0 has tag, x1 has payload (if enum was returned from function)
+              self._emit(f"    str x0, [x29, #{offset}]")  # Tag at first slot
+              self._emit(f"    str x1, [x29, #{offset - 8}]")  # Payload at second slot
           self.next_slot += 2
 
         elif is_result_type(type_str):
@@ -1197,8 +1206,8 @@ class CodeGenerator:
       case VarExpr(name):
         offset, type_str = self.locals[name]
         self._emit(f"    ldr x0, [x29, #{offset}]")
-        # For Result types, also load payload into x1
-        if is_result_type(type_str):
+        # For Result and enum types, also load payload into x1
+        if is_result_type(type_str) or type_str in self.enums:
           self._emit(f"    ldr x1, [x29, #{offset - 8}]")
 
       case BinaryExpr(left, op, right):
@@ -1393,19 +1402,27 @@ class CodeGenerator:
             self._gen_expr(target)
             pass
 
-      case EnumLiteral(enum_name, _, variant_name, payload):
-        # Enum literal: just return the tag (for simple comparisons)
-        # Full enum storage is handled in LetStmt
-        variants = self.enums[enum_name]
+      case EnumLiteral(enum_name, type_args, variant_name, payload):
+        # Enum literal: return tag in x0 and payload in x1
+
+        # Construct the mangled enum name for generic enums
+        mangled_enum_name = enum_name
+        if type_args:
+          type_arg_strs = [type_to_str(a, self.type_aliases) for a in type_args]
+          mangled_enum_name = f"{enum_name}<{','.join(type_arg_strs)}>"
+
+        variants = self.enums[mangled_enum_name]
         tag, _ = variants[variant_name]
-        self._emit(f"    mov x0, #{tag}")
-        # If there's a payload, evaluate it but we can only return one value
-        # The payload is typically used in LetStmt context, not standalone
+
         if payload is not None:
-          # Push tag, evaluate payload, then restore tag
-          self._emit("    str x0, [sp, #-16]!")
+          # Evaluate payload first, then set tag
           self._gen_expr(payload)
-          self._emit("    ldr x0, [sp], #16")  # Return tag
+          self._emit("    mov x1, x0")  # Payload in x1
+          self._emit(f"    mov x0, #{tag}")  # Tag in x0
+        else:
+          # No payload
+          self._emit(f"    mov x0, #{tag}")  # Tag in x0
+          self._emit("    mov x1, #0")  # No payload
 
       case MatchExpr(target, arms):
         self._gen_match(target, arms)
@@ -1465,23 +1482,46 @@ class CodeGenerator:
         self._emit("    mov x0, #1")  # Tag in x0 (Err = 1)
 
       case TryExpr(target):
-        # expr? - check if Result is Err, if so return early, otherwise unwrap Ok
+        # expr? - check if Option is None or Result is Err, if so return early
         self._gen_expr(target)
         # x0 = tag, x1 = payload
-        err_label = self._new_label("try_err")
-        ok_label = self._new_label("try_ok")
-        # Check if tag is Err (1)
-        self._emit("    cmp x0, #1")
-        self._emit(f"    b.eq {err_label}")
-        # Ok path: result is in x1 (payload), move to x0
-        self._emit("    mov x0, x1")
-        self._emit(f"    b {ok_label}")
-        # Err path: return early with Err
-        self._emit(f"{err_label}:")
-        self._emit("    mov x0, #1")  # Tag = Err
-        # x1 already has error payload
-        self._emit(f"    b _{self.current_func_name}_epilogue")
-        self._emit(f"{ok_label}:")
+
+        # Check if this is Option or Result type
+        expr_id = id(expr)
+        try_type = self.try_expr_types.get(expr_id, "result")  # Default to Result for backwards compatibility
+
+        if try_type == "option":
+          # Option: Some has tag 0, None has tag 1
+          none_label = self._new_label("try_none")
+          some_label = self._new_label("try_some")
+          # Check if tag is None (1)
+          self._emit("    cmp x0, #1")
+          self._emit(f"    b.eq {none_label}")
+          # Some path: result is in x1 (payload), move to x0
+          self._emit("    mov x0, x1")
+          self._emit(f"    b {some_label}")
+          # None path: return early with None
+          self._emit(f"{none_label}:")
+          self._emit("    mov x0, #1")  # Tag = None
+          self._emit("    mov x1, #0")  # No payload for None
+          self._emit(f"    b _{self.current_func_name}_epilogue")
+          self._emit(f"{some_label}:")
+        else:
+          # Result: Ok has tag 0, Err has tag 1
+          err_label = self._new_label("try_err")
+          ok_label = self._new_label("try_ok")
+          # Check if tag is Err (1)
+          self._emit("    cmp x0, #1")
+          self._emit(f"    b.eq {err_label}")
+          # Ok path: result is in x1 (payload), move to x0
+          self._emit("    mov x0, x1")
+          self._emit(f"    b {ok_label}")
+          # Err path: return early with Err
+          self._emit(f"{err_label}:")
+          self._emit("    mov x0, #1")  # Tag = Err
+          # x1 already has error payload
+          self._emit(f"    b _{self.current_func_name}_epilogue")
+          self._emit(f"{ok_label}:")
 
       case ListComprehension(element_expr, var_name, start, end, condition):
         # [expr for var in range(start, end) if condition]

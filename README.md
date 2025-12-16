@@ -130,6 +130,35 @@ fn main() -> i64:
     0
 ```
 
+**Option Type and ? Operator (like Rust):**
+```
+# Generic Option enum for nullable values
+enum Option<T>:
+    Some(T)
+    None
+
+fn get_positive(x: i64) -> Option<i64>:
+    if x > 0:
+        Option<i64>::Some(x)
+    else:
+        Option<i64>::None
+
+# The ? operator unwraps Some or propagates None
+fn add_positives(a: i64, b: i64) -> Option<i64>:
+    let x: i64 = get_positive(a)?  # Returns early with None if a <= 0
+    let y: i64 = get_positive(b)?  # Returns early with None if b <= 0
+    Option<i64>::Some(x + y)
+
+fn main() -> i64:
+    let result: Option<i64> = add_positives(10, 20)
+    match result:
+        Option<i64>::Some(val):
+            print(val)  # 30
+        Option<i64>::None:
+            print(0)
+    0
+```
+
 **Rust-style Pattern Guards:**
 ```
 enum Option:
@@ -471,7 +500,6 @@ vibec source.vb --keep-asm
 ## Todo
 
 - Traits (rust)
-- ? for Option Types (Rust)
 - Default Parameter Values (Python)
 - String Interpolation / F-strings (Python)
 - Or-Patterns in Match (Rust)
