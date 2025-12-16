@@ -2902,3 +2902,86 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 20  # 0 + 2 + 4 + 6 + 8 = 20
+
+  # === List comprehension tests ===
+
+  def test_list_comprehension_basic(self):
+    """Test basic list comprehension."""
+    source = """fn main() -> i64:
+    let squares: vec[i64] = [x * x for x in range(0, 5)]
+    squares[0] + squares[1] + squares[2] + squares[3] + squares[4]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30  # 0 + 1 + 4 + 9 + 16 = 30
+
+  def test_list_comprehension_with_condition(self):
+    """Test list comprehension with if filter."""
+    source = """fn main() -> i64:
+    let evens: vec[i64] = [x for x in range(0, 10) if x % 2 == 0]
+    evens[0] + evens[1] + evens[2] + evens[3] + evens[4]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 20  # 0 + 2 + 4 + 6 + 8 = 20
+
+  def test_list_comprehension_expression(self):
+    """Test list comprehension with complex expression."""
+    source = """fn main() -> i64:
+    let doubled: vec[i64] = [x * 2 + 1 for x in range(0, 5)]
+    doubled[0] + doubled[1] + doubled[2] + doubled[3] + doubled[4]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 25  # 1 + 3 + 5 + 7 + 9 = 25
+
+  def test_list_comprehension_len(self):
+    """Test length of list from comprehension."""
+    source = """fn main() -> i64:
+    let nums: vec[i64] = [x for x in range(0, 7)]
+    nums.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 7
+
+  def test_list_comprehension_filtered_len(self):
+    """Test length of filtered list comprehension."""
+    source = """fn main() -> i64:
+    let odds: vec[i64] = [x for x in range(0, 10) if x % 2 == 1]
+    odds.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 5  # 1, 3, 5, 7, 9
+
+  def test_list_comprehension_sum(self):
+    """Test sum of list comprehension."""
+    source = """fn main() -> i64:
+    let nums: vec[i64] = [x * x for x in range(1, 6)]
+    nums.sum()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 55  # 1 + 4 + 9 + 16 + 25 = 55
+
+  def test_list_comprehension_empty_result(self):
+    """Test list comprehension that produces empty result."""
+    source = """fn main() -> i64:
+    let empty: vec[i64] = [x for x in range(0, 10) if x > 100]
+    empty.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 0
+
+  def test_list_comprehension_growing(self):
+    """Test list comprehension that needs to grow the vec."""
+    source = """fn main() -> i64:
+    let nums: vec[i64] = [x for x in range(0, 20)]
+    nums.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 20
+
+  def test_list_comprehension_with_method_chain(self):
+    """Test list comprehension result with method chaining."""
+    source = """fn main() -> i64:
+    let nums: vec[i64] = [x * 2 for x in range(0, 5)]
+    nums.map(|x: i64| -> i64: x + 1).sum()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 25  # (0+1) + (2+1) + (4+1) + (6+1) + (8+1) = 25

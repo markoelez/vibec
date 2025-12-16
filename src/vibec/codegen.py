@@ -48,6 +48,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  ListComprehension,
 )
 
 
@@ -284,6 +285,12 @@ class CodeGenerator:
         self._collect_strings_from_expr(value)
       case TryExpr(target):
         self._collect_strings_from_expr(target)
+      case ListComprehension(element_expr, _, start, end, condition):
+        self._collect_strings_from_expr(element_expr)
+        self._collect_strings_from_expr(start)
+        self._collect_strings_from_expr(end)
+        if condition is not None:
+          self._collect_strings_from_expr(condition)
       case _:
         pass
 
@@ -1097,6 +1104,137 @@ class CodeGenerator:
         # x1 already has error payload
         self._emit(f"    b _{self.current_func_name}_epilogue")
         self._emit(f"{ok_label}:")
+
+      case ListComprehension(element_expr, var_name, start, end, condition):
+        # [expr for var in range(start, end) if condition]
+        # This generates: let result = []; for var in range(start, end): if condition: result.push(expr)
+        self._gen_list_comprehension(element_expr, var_name, start, end, condition)
+
+  def _gen_list_comprehension(self, element_expr: Expr, var_name: str, start: Expr, end: Expr, condition: Expr | None) -> None:
+    """Generate code for list comprehension: [expr for var in range(start, end) if condition]."""
+    # Allocate a temporary vec on stack
+    # We need: vec_ptr, loop_var, start_val, end_val
+    # Use stack offsets relative to sp for temporaries
+
+    # Save any existing binding for var_name (for nested comprehensions or shadowing)
+    old_binding = self.locals.get(var_name)
+    saved_next_slot = self.next_slot
+
+    # Save start and end values to stack
+    self._gen_expr(start)
+    self._emit("    str x0, [sp, #-16]!")  # start at [sp]
+    self._gen_expr(end)
+    self._emit("    str x0, [sp, #-16]!")  # end at [sp], start at [sp+16]
+
+    # Allocate initial vec: malloc(24) for header (cap=8, len=0) + space
+    # Initial capacity 8 elements = 8 * 8 = 64 bytes
+    self._emit("    mov x0, #88")  # 24 (header) + 64 (8 elements)
+    self._emit("    bl _malloc")
+    # Store capacity and length in header
+    self._emit("    mov x1, #8")
+    self._emit("    str x1, [x0]")  # capacity = 8
+    self._emit("    str xzr, [x0, #8]")  # length = 0
+    # Save vec ptr to stack
+    self._emit("    str x0, [sp, #-16]!")  # vec_ptr at [sp], end at [sp+16], start at [sp+32]
+
+    # Allocate loop variable
+    loop_var_offset = -16 - (self.next_slot * 8)
+    self.locals[var_name] = (loop_var_offset, "i64")
+    self.next_slot += 1
+
+    # Initialize loop variable with start
+    self._emit("    ldr x0, [sp, #32]")  # Load start
+    self._emit(f"    str x0, [x29, #{loop_var_offset}]")
+
+    # Loop labels
+    loop_start = self._new_label("lc_loop")
+    loop_end = self._new_label("lc_end")
+    cond_skip = self._new_label("lc_skip") if condition else None
+
+    self._emit(f"{loop_start}:")
+
+    # Check loop condition: var < end
+    self._emit(f"    ldr x0, [x29, #{loop_var_offset}]")  # Load var
+    self._emit("    ldr x1, [sp, #16]")  # Load end
+    self._emit("    cmp x0, x1")
+    self._emit(f"    b.ge {loop_end}")
+
+    # If there's a condition, check it
+    if condition is not None:
+      self._gen_expr(condition)
+      self._emit("    cmp x0, #0")
+      self._emit(f"    b.eq {cond_skip}")
+
+    # Evaluate element expression
+    self._gen_expr(element_expr)
+    self._emit("    mov x2, x0")  # Save element value in x2
+
+    # Push to vec: load vec ptr, check capacity, maybe grow, store element
+    self._emit("    ldr x0, [sp]")  # Load vec_ptr
+    self._emit("    ldr x3, [x0]")  # capacity
+    self._emit("    ldr x4, [x0, #8]")  # length
+
+    # Check if we need to grow (length >= capacity)
+    grow_label = self._new_label("lc_grow")
+    no_grow_label = self._new_label("lc_no_grow")
+    self._emit("    cmp x4, x3")
+    self._emit(f"    b.ge {grow_label}")
+    self._emit(f"    b {no_grow_label}")
+
+    # Grow the vec
+    self._emit(f"{grow_label}:")
+    # New capacity = old * 2
+    self._emit("    lsl x3, x3, #1")  # capacity * 2
+    # New size = 24 + capacity * 8
+    self._emit("    lsl x5, x3, #3")  # capacity * 8
+    self._emit("    add x5, x5, #24")  # + header size
+    # Save registers we need
+    self._emit("    str x2, [sp, #-16]!")  # Save element value
+    self._emit("    str x3, [sp, #-16]!")  # Save new capacity
+    # realloc(vec_ptr, new_size)
+    self._emit("    ldr x0, [sp, #32]")  # Load vec_ptr (now at sp+32 due to pushes)
+    self._emit("    mov x1, x5")
+    self._emit("    bl _realloc")
+    # Restore and update
+    self._emit("    ldr x3, [sp], #16")  # Restore new capacity
+    self._emit("    ldr x2, [sp], #16")  # Restore element value
+    self._emit("    str x0, [sp]")  # Update vec_ptr on stack
+    self._emit("    str x3, [x0]")  # Update capacity in header
+    self._emit("    ldr x4, [x0, #8]")  # Reload length
+
+    self._emit(f"{no_grow_label}:")
+    # Store element at data[length]
+    self._emit("    ldr x0, [sp]")  # Load vec_ptr
+    self._emit("    ldr x4, [x0, #8]")  # Load current length
+    self._emit("    add x5, x0, #16")  # data pointer
+    self._emit("    str x2, [x5, x4, lsl #3]")  # data[length] = element
+    # Increment length
+    self._emit("    add x4, x4, #1")
+    self._emit("    str x4, [x0, #8]")
+
+    # Skip label for condition
+    if cond_skip is not None:
+      self._emit(f"{cond_skip}:")
+
+    # Increment loop variable
+    self._emit(f"    ldr x0, [x29, #{loop_var_offset}]")
+    self._emit("    add x0, x0, #1")
+    self._emit(f"    str x0, [x29, #{loop_var_offset}]")
+    self._emit(f"    b {loop_start}")
+
+    self._emit(f"{loop_end}:")
+
+    # Return vec pointer
+    self._emit("    ldr x0, [sp]")
+    # Clean up stack (vec_ptr, end, start)
+    self._emit("    add sp, sp, #48")
+
+    # Restore old binding if any
+    if old_binding is not None:
+      self.locals[var_name] = old_binding
+    else:
+      del self.locals[var_name]
+    self.next_slot = saved_next_slot
 
   def _gen_print(self, args: tuple[Expr, ...]) -> None:
     """Generate code for print() builtin.

@@ -254,6 +254,17 @@ class TryExpr:
   target: "Expr"
 
 
+@dataclass(frozen=True, slots=True)
+class ListComprehension:
+  """List comprehension: [expr for var in iterable] or [expr for var in iterable if cond]."""
+
+  element_expr: "Expr"  # Expression to evaluate for each element
+  var_name: str  # Loop variable name
+  start: "Expr"  # Range start (for now, only range() is supported)
+  end: "Expr"  # Range end
+  condition: "Expr | None"  # Optional filter condition
+
+
 # Expression union type
 Expr = (
   IntLiteral
@@ -279,6 +290,7 @@ Expr = (
   | OkExpr
   | ErrExpr
   | TryExpr
+  | ListComprehension
 )
 
 

@@ -52,6 +52,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  ListComprehension,
 )
 from .tokens import Token, TokenType
 
@@ -722,21 +723,55 @@ class Parser:
     self._expect(TokenType.RBRACE, "Expected '}'")
     return StructLiteral(name, tuple(fields))
 
-  def _parse_array_literal(self) -> ArrayLiteral:
-    """Parse array literal: [expr, expr, ...]."""
+  def _parse_array_literal(self) -> ArrayLiteral | ListComprehension:
+    """Parse array literal [expr, expr, ...] or list comprehension [expr for var in range(start, end) if cond]."""
     self._expect(TokenType.LBRACKET, "Expected '['")
-    elements: list[Expr] = []
 
-    if not self._check(TokenType.RBRACKET):
+    if self._check(TokenType.RBRACKET):
+      # Empty array
+      self._advance()
+      return ArrayLiteral(())
+
+    # Parse first expression
+    first_expr = self._parse_expression()
+
+    # Check if this is a list comprehension: [expr for var in range(...)]
+    if self._check(TokenType.FOR):
+      return self._parse_list_comprehension(first_expr)
+
+    # Regular array literal
+    elements: list[Expr] = [first_expr]
+    while self._check(TokenType.COMMA):
+      self._advance()
+      if self._check(TokenType.RBRACKET):
+        break  # Allow trailing comma
       elements.append(self._parse_expression())
-      while self._check(TokenType.COMMA):
-        self._advance()
-        if self._check(TokenType.RBRACKET):
-          break  # Allow trailing comma
-        elements.append(self._parse_expression())
 
     self._expect(TokenType.RBRACKET, "Expected ']'")
     return ArrayLiteral(tuple(elements))
+
+  def _parse_list_comprehension(self, element_expr: Expr) -> ListComprehension:
+    """Parse remainder of list comprehension after element expression: for var in range(start, end) [if cond]]."""
+    self._expect(TokenType.FOR, "Expected 'for'")
+    var_token = self._expect(TokenType.IDENT, "Expected loop variable")
+    self._expect(TokenType.IN, "Expected 'in'")
+
+    # Expect range(start, end)
+    self._expect(TokenType.RANGE, "Expected 'range'")
+    self._expect(TokenType.LPAREN, "Expected '(' after range")
+    start_expr = self._parse_expression()
+    self._expect(TokenType.COMMA, "Expected ',' in range()")
+    end_expr = self._parse_expression()
+    self._expect(TokenType.RPAREN, "Expected ')' after range arguments")
+
+    # Optional condition: if cond
+    condition: Expr | None = None
+    if self._check(TokenType.IF):
+      self._advance()
+      condition = self._parse_expression()
+
+    self._expect(TokenType.RBRACKET, "Expected ']'")
+    return ListComprehension(element_expr, var_token.value, start_expr, end_expr, condition)
 
   def _parse_match(self) -> MatchExpr:
     """Parse match expression: match expr: INDENT arms... DEDENT"""

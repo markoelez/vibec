@@ -88,6 +88,22 @@ fn main() -> i64:
     0
 ```
 
+**Python-style List Comprehensions:**
+```
+fn main() -> i64:
+    # Basic comprehension
+    let squares: vec[i64] = [x * x for x in range(0, 10)]
+    print(squares.sum())  # 285
+    
+    # With filter condition
+    let evens: vec[i64] = [x for x in range(0, 20) if x % 2 == 0]
+    print(evens.len())  # 10
+    
+    # Complex expressions
+    let transformed: vec[i64] = [x * 2 + 1 for x in range(0, 5)]
+    0
+```
+
 **Functional Iterator Methods:**
 ```
 fn main() -> i64:
@@ -104,7 +120,7 @@ fn main() -> i64:
     0
 ```
 
-**Supported:** `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
+**Supported:** list comprehensions, `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
 
 
 ## Architecture

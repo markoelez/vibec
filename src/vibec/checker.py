@@ -48,6 +48,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  ListComprehension,
 )
 
 
@@ -1143,6 +1144,32 @@ class TypeChecker:
         if ok_type is None:
           raise TypeError(f"Invalid Result type: {target_type}")
         return ok_type
+
+      case ListComprehension(element_expr, var_name, start, end, condition):
+        # [expr for var in range(start, end) if condition]
+        # Check range bounds
+        start_type = self._check_expr(start)
+        end_type = self._check_expr(end)
+        if start_type != "i64":
+          raise TypeError(f"Range start must be i64, got {start_type}")
+        if end_type != "i64":
+          raise TypeError(f"Range end must be i64, got {end_type}")
+
+        # Create scope with loop variable
+        self._enter_scope()
+        self._define_var(var_name, "i64")
+
+        # Check element expression
+        elem_type = self._check_expr(element_expr)
+
+        # Check condition if present
+        if condition is not None:
+          cond_type = self._check_expr(condition)
+          if cond_type != "bool":
+            raise TypeError(f"List comprehension condition must be bool, got {cond_type}")
+
+        self._exit_scope()
+        return f"vec[{elem_type}]"
 
     raise TypeError(f"Unknown expression type: {type(expr)}")
 
