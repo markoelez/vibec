@@ -105,6 +105,16 @@ OP_STRINGS: dict[TokenType, str] = {
   TokenType.OR: "or",
 }
 
+# Comparison operators (for chained comparisons like 0 < x < 10)
+COMPARISON_OPS: set[TokenType] = {
+  TokenType.LT,
+  TokenType.GT,
+  TokenType.LE,
+  TokenType.GE,
+  TokenType.EQ,
+  TokenType.NE,
+}
+
 
 class Parser:
   """Parses tokens into an AST."""
@@ -649,7 +659,10 @@ class Parser:
     return self._parse_binary(0)
 
   def _parse_binary(self, min_prec: int) -> Expr:
-    """Parse binary expression with precedence climbing."""
+    """Parse binary expression with precedence climbing.
+
+    Supports Python-style chained comparisons (e.g., 0 < x < 10).
+    """
     left = self._parse_unary()
 
     while True:
@@ -659,12 +672,63 @@ class Parser:
       if prec is None or prec < min_prec:
         break
 
+      # Check for chained comparisons (e.g., 0 < x < 10 -> (0 < x) and (x < 10))
+      if token.type in COMPARISON_OPS:
+        left = self._parse_chained_comparison(left, min_prec)
+        continue
+
       op = OP_STRINGS[token.type]
       self._advance()
       right = self._parse_binary(prec + 1)
       left = BinaryExpr(left, op, right)
 
     return left
+
+  def _parse_chained_comparison(self, first: Expr, min_prec: int) -> Expr:
+    """Parse chained comparisons like 0 < x < 10.
+
+    Transforms into: (0 < x) and (x < 10)
+    Each operand is evaluated only once in the AST (though the middle operand
+    appears in multiple comparisons, it's the same AST node).
+    """
+    # Collect all operands and operators in the chain
+    operands: list[Expr] = [first]
+    operators: list[str] = []
+
+    # Arithmetic operators have higher precedence than comparisons
+    # Parse operands at arithmetic level (precedence 5) to allow: 0 < x + 1 < 10
+    arithmetic_prec = 5  # PLUS/MINUS precedence
+
+    while True:
+      token = self._current()
+      if token.type not in COMPARISON_OPS:
+        break
+      prec = PRECEDENCE[token.type]
+      if prec < min_prec:
+        break
+
+      operators.append(OP_STRINGS[token.type])
+      self._advance()
+      # Parse at arithmetic precedence to capture expressions like x + 1
+      operand = self._parse_binary(arithmetic_prec)
+      operands.append(operand)
+
+    # Build the result
+    if len(operators) == 1:
+      # Single comparison, not actually a chain
+      return BinaryExpr(operands[0], operators[0], operands[1])
+
+    # Multiple comparisons: chain them with 'and'
+    # a < b < c < d -> (a < b) and (b < c) and (c < d)
+    comparisons: list[Expr] = []
+    for i, op in enumerate(operators):
+      comparisons.append(BinaryExpr(operands[i], op, operands[i + 1]))
+
+    result = comparisons[0]
+    for comp in comparisons[1:]:
+      result = BinaryExpr(result, "and", comp)
+
+    return result
 
   def _parse_unary(self) -> Expr:
     """Parse unary expression."""

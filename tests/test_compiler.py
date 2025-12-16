@@ -3955,3 +3955,144 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 6  # 1 + 2 + 3
+
+  # === Chained Comparison Tests ===
+
+  def test_chained_comparison_basic(self):
+    """Test basic chained comparison: 0 < x < 10."""
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    if 0 < x < 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_chained_comparison_false_left(self):
+    """Test chained comparison where left comparison is false."""
+    source = """fn main() -> i64:
+    let x: i64 = 0
+    if 0 < x < 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 0  # 0 < 0 is false
+
+  def test_chained_comparison_false_right(self):
+    """Test chained comparison where right comparison is false."""
+    source = """fn main() -> i64:
+    let x: i64 = 15
+    if 0 < x < 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 0  # 15 < 10 is false
+
+  def test_chained_comparison_three_parts(self):
+    """Test three-part chained comparison: a < b < c < d."""
+    source = """fn main() -> i64:
+    let a: i64 = 1
+    let b: i64 = 2
+    let c: i64 = 3
+    let d: i64 = 4
+    if a < b < c < d:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_chained_comparison_three_parts_false(self):
+    """Test three-part chained comparison that fails."""
+    source = """fn main() -> i64:
+    let a: i64 = 1
+    let b: i64 = 5
+    let c: i64 = 3
+    let d: i64 = 4
+    if a < b < c < d:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 0  # 5 < 3 is false
+
+  def test_chained_comparison_le_ge(self):
+    """Test chained comparison with <= and >=."""
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    if 0 <= x <= 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_chained_comparison_le_boundary(self):
+    """Test chained comparison at boundary with <=."""
+    source = """fn main() -> i64:
+    let x: i64 = 0
+    if 0 <= x <= 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 0 <= 0 is true
+
+  def test_chained_comparison_mixed_ops(self):
+    """Test chained comparison with mixed operators."""
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    if 0 < x <= 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_chained_comparison_with_expressions(self):
+    """Test chained comparison with arithmetic expressions."""
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    if 0 < x + 1 < 10:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 0 < 6 < 10
+
+  def test_chained_comparison_equality(self):
+    """Test chained comparison with equality."""
+    source = """fn main() -> i64:
+    let x: i64 = 5
+    let y: i64 = 5
+    if x == y == 5:
+        1
+    else:
+        0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1
+
+  def test_chained_comparison_in_loop(self):
+    """Test chained comparison in a loop condition."""
+    source = """fn main() -> i64:
+    let sum: i64 = 0
+    for i in range(0, 20):
+        if 5 <= i < 15:
+            sum = sum + 1
+    sum
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 10  # i from 5 to 14 inclusive

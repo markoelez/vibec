@@ -206,6 +206,37 @@ fn main() -> i64:
     0
 ```
 
+**Python-style Chained Comparisons:**
+```
+fn main() -> i64:
+    let x: i64 = 5
+    
+    # Chained comparisons: a < b < c is equivalent to (a < b) and (b < c)
+    if 0 < x < 10:
+        print(1)  # x is in range (0, 10)
+    
+    # Works with any comparison operators
+    if 0 <= x <= 100:
+        print(2)  # x is in range [0, 100]
+    
+    # Multiple chains
+    let a: i64 = 1
+    let b: i64 = 2
+    let c: i64 = 3
+    if a < b < c:
+        print(3)  # all comparisons true
+    
+    # Can mix different operators
+    if 0 < x <= 10:
+        print(4)
+    
+    # Works with expressions
+    if 0 < x + 1 < 20:
+        print(5)
+    
+    0
+```
+
 **Functional Iterator Methods:**
 ```
 fn main() -> i64:
@@ -269,7 +300,7 @@ fn main() -> i64:
     return 0
 ```
 
-**Supported:** generics (structs, enums, functions, impl blocks) with type inference, type aliases, `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, slice syntax (`v[1:3]`, `v[::2]`, negative indices), `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
+**Supported:** generics (structs, enums, functions, impl blocks) with type inference, type aliases, `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, slice syntax (`v[1:3]`, `v[::2]`, negative indices), chained comparisons (`0 < x < 10`), `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
 
 
 ## Architecture
@@ -329,7 +360,6 @@ vibec source.vb --keep-asm
 
 ## Todo
 
-- Chained comparisons (python)
 - Pattern guards (rust)
 - Traits (rust)
 
