@@ -4096,3 +4096,170 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 10  # i from 5 to 14 inclusive
+
+  # === Pattern Guard Tests ===
+
+  def test_pattern_guard_basic(self):
+    """Test basic pattern guard on Option enum."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(5)
+    match opt:
+        Option::Some(x) if x > 3:
+            1
+        Option::Some(x):
+            0
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 5 > 3 is true
+
+  def test_pattern_guard_false(self):
+    """Test pattern guard that evaluates to false."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(2)
+    match opt:
+        Option::Some(x) if x > 3:
+            1
+        Option::Some(x):
+            x
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 2  # 2 > 3 is false, falls through to second arm
+
+  def test_pattern_guard_result(self):
+    """Test pattern guard with Result type."""
+    source = """fn main() -> i64:
+    let r: Result[i64, i64] = Ok(10)
+    match r:
+        Ok(val) if val > 5:
+            1
+        Ok(val):
+            0
+        Err(e):
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 10 > 5 is true
+
+  def test_pattern_guard_result_false(self):
+    """Test pattern guard with Result type that evaluates to false."""
+    source = """fn main() -> i64:
+    let r: Result[i64, i64] = Ok(3)
+    match r:
+        Ok(val) if val > 5:
+            1
+        Ok(val):
+            val
+        Err(e):
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 3  # 3 > 5 is false, falls through to second arm
+
+  def test_pattern_guard_multiple_conditions(self):
+    """Test pattern guard with complex boolean expression."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(7)
+    match opt:
+        Option::Some(x) if x > 5 and x < 10:
+            1
+        Option::Some(x):
+            0
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 7 > 5 and 7 < 10 is true
+
+  def test_pattern_guard_chained_comparison(self):
+    """Test pattern guard with chained comparison."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(7)
+    match opt:
+        Option::Some(x) if 5 < x < 10:
+            1
+        Option::Some(x):
+            0
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 5 < 7 < 10 is true
+
+  def test_pattern_guard_multiple_guards_same_variant(self):
+    """Test multiple pattern guards on the same variant."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(15)
+    match opt:
+        Option::Some(x) if x < 5:
+            1
+        Option::Some(x) if x < 10:
+            2
+        Option::Some(x) if x < 20:
+            3
+        Option::Some(x):
+            4
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 3  # 15 < 5 false, 15 < 10 false, 15 < 20 true
+
+  def test_pattern_guard_no_match_falls_through(self):
+    """Test that failing all guards falls through to unguarded arm."""
+    source = """enum Option:
+    Some(i64)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(100)
+    match opt:
+        Option::Some(x) if x < 10:
+            1
+        Option::Some(x) if x < 50:
+            2
+        Option::Some(x):
+            x
+        Option::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 100  # All guards fail, falls through to unguarded arm
+
+  def test_pattern_guard_err_variant(self):
+    """Test pattern guard on Err variant of Result."""
+    source = """fn main() -> i64:
+    let r: Result[i64, i64] = Err(42)
+    match r:
+        Ok(val):
+            0
+        Err(e) if e > 40:
+            1
+        Err(e):
+            2
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 1  # 42 > 40 is true

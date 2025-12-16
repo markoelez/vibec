@@ -1601,28 +1601,40 @@ class TypeChecker:
 
           # Check each arm
           covered_variants: set[str] = set()
+          # Track which variants have an unguarded arm (for exhaustiveness)
+          unguarded_variants: set[str] = set()
           for arm in arms:
             if arm.enum_name != "Result":
               raise TypeError(f"Match arm pattern uses wrong type '{arm.enum_name}', expected 'Result'")
             if arm.variant_name not in ("Ok", "Err"):
               raise TypeError(f"Result has no variant '{arm.variant_name}'")
-            if arm.variant_name in covered_variants:
+            # Allow duplicate variants if they have guards
+            if arm.variant_name in covered_variants and arm.guard is None and arm.variant_name in unguarded_variants:
               raise TypeError(f"Duplicate match arm for variant '{arm.variant_name}'")
             covered_variants.add(arm.variant_name)
+            if arm.guard is None:
+              unguarded_variants.add(arm.variant_name)
 
-            # Check binding
+            # Check binding and guard
             self._enter_scope()
             if arm.binding is not None:
               binding_type = ok_type if arm.variant_name == "Ok" else err_type
               if binding_type is not None:
                 self._define_var(arm.binding, binding_type)
 
+            # Check pattern guard (if present)
+            if arm.guard is not None:
+              guard_type = self._check_expr(arm.guard)
+              if guard_type != "bool":
+                raise TypeError(f"Pattern guard must be bool, got {guard_type}")
+
             # Check arm body
             for stmt in arm.body:
               self._check_stmt(stmt)
             self._exit_scope()
 
-          # Check exhaustiveness
+          # Check exhaustiveness (guards make this complex - for now, require all variants)
+          # Note: In Rust, guards can make a match non-exhaustive, but we require all variants covered
           missing = {"Ok", "Err"} - covered_variants
           if missing:
             raise TypeError(f"Non-exhaustive match: missing variants {', '.join(sorted(missing))}")
@@ -1636,17 +1648,22 @@ class TypeChecker:
         enum_info = self.enums[target_type]
 
         # Check each arm
-        covered_variants = set()
+        covered_variants: set[str] = set()
+        # Track which variants have an unguarded arm (for exhaustiveness)
+        unguarded_variants: set[str] = set()
         for arm in arms:
           if arm.enum_name != target_type:
             raise TypeError(f"Match arm pattern uses wrong enum '{arm.enum_name}', expected '{target_type}'")
           if arm.variant_name not in enum_info.variants:
             raise TypeError(f"Enum '{target_type}' has no variant '{arm.variant_name}'")
-          if arm.variant_name in covered_variants:
+          # Allow duplicate variants if they have guards
+          if arm.variant_name in covered_variants and arm.guard is None and arm.variant_name in unguarded_variants:
             raise TypeError(f"Duplicate match arm for variant '{arm.variant_name}'")
           covered_variants.add(arm.variant_name)
+          if arm.guard is None:
+            unguarded_variants.add(arm.variant_name)
 
-          # Check binding
+          # Check binding and guard
           variant_payload = enum_info.variants[arm.variant_name]
           self._enter_scope()
           if variant_payload is not None and arm.binding is not None:
@@ -1654,12 +1671,19 @@ class TypeChecker:
           elif variant_payload is None and arm.binding is not None:
             raise TypeError(f"Variant '{arm.variant_name}' has no payload to bind")
 
+          # Check pattern guard (if present)
+          if arm.guard is not None:
+            guard_type = self._check_expr(arm.guard)
+            if guard_type != "bool":
+              raise TypeError(f"Pattern guard must be bool, got {guard_type}")
+
           # Check arm body - get result type from last statement if it's a return
           for stmt in arm.body:
             self._check_stmt(stmt)
           self._exit_scope()
 
-        # Check exhaustiveness
+        # Check exhaustiveness (guards make this complex - for now, require all variants)
+        # Note: In Rust, guards can make a match non-exhaustive, but we require all variants covered
         missing = set(enum_info.variants.keys()) - covered_variants
         if missing:
           raise TypeError(f"Non-exhaustive match: missing variants {', '.join(sorted(missing))}")
@@ -2260,9 +2284,18 @@ class TypeChecker:
       case MatchExpr(target, arms):
         new_target = self._transform_expr(target)
         new_arms = tuple(
-          MatchArm(arm.enum_name, arm.variant_name, arm.binding, tuple(self._transform_stmt(s) for s in arm.body)) for arm in arms
+          MatchArm(
+            arm.enum_name,
+            arm.variant_name,
+            arm.binding,
+            tuple(self._transform_stmt(s) for s in arm.body),
+            self._transform_expr(arm.guard) if arm.guard else None,
+          )
+          for arm in arms
         )
-        if new_target is target and all(new_arm.body == old_arm.body for new_arm, old_arm in zip(new_arms, arms)):
+        if new_target is target and all(
+          new_arm.body == old_arm.body and new_arm.guard is old_arm.guard for new_arm, old_arm in zip(new_arms, arms)
+        ):
           return expr
         return MatchExpr(new_target, new_arms)
 

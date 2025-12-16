@@ -220,6 +220,7 @@ class MatchArm:
   variant_name: str
   binding: str | None  # Variable name to bind payload (None for unit variants)
   body: tuple["Stmt", ...]
+  guard: "Expr | None" = None  # Optional pattern guard (if condition)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1201,10 +1201,16 @@ class Parser:
           binding = binding_token.value
           self._expect(TokenType.RPAREN, "Expected ')'")
 
+      # Parse optional pattern guard: if condition
+      guard: Expr | None = None
+      if self._check(TokenType.IF):
+        self._advance()  # consume 'if'
+        guard = self._parse_expression()
+
       self._expect(TokenType.COLON, "Expected ':'")
       self._expect(TokenType.NEWLINE, "Expected newline after ':'")
       body = self._parse_block()
-      arms.append(MatchArm(enum_name, variant_name, binding, tuple(body)))
+      arms.append(MatchArm(enum_name, variant_name, binding, tuple(body), guard))
 
     self._expect(TokenType.DEDENT, "Expected dedent")
     return MatchExpr(target, tuple(arms))

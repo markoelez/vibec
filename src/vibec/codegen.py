@@ -319,6 +319,8 @@ class CodeGenerator:
       case MatchExpr(target, arms):
         self._collect_strings_from_expr(target)
         for arm in arms:
+          if arm.guard is not None:
+            self._collect_strings_from_expr(arm.guard)
           self._collect_strings_from_stmts(arm.body)
       case RefExpr(target, _):
         self._collect_strings_from_expr(target)
@@ -3210,11 +3212,14 @@ class CodeGenerator:
         if is_result_match:
           self._emit("    mov x9, x1")  # Payload in x9
 
-    # Generate comparison chain for each arm
+    # Generate labels for each arm and for "next arm" checks (for guards)
     arm_labels: list[str] = []
-    for arm in arms:
+    next_arm_labels: list[str] = []
+    for i, arm in enumerate(arms):
       arm_labels.append(self._new_label("match_arm"))
+      next_arm_labels.append(self._new_label("match_next"))
 
+    # Generate comparison chain for each arm
     for i, arm in enumerate(arms):
       if is_result_match:
         # Result: Ok=0, Err=1
@@ -3242,6 +3247,7 @@ class CodeGenerator:
         _, has_payload = variants[arm.variant_name]
 
       # If there's a binding, allocate slot and store payload
+      binding_offset: int | None = None
       if arm.binding is not None and has_payload:
         binding_offset = -16 - (self.next_slot * 8)
         self.locals[arm.binding] = (binding_offset, "i64")  # Assume i64 for now
@@ -3257,11 +3263,35 @@ class CodeGenerator:
             if is_result_match:
               self._emit(f"    str x9, [x29, #{binding_offset}]")
 
+      # Check pattern guard (if present)
+      if arm.guard is not None:
+        # Evaluate guard expression - result in x0 (0=false, 1=true)
+        self._gen_expr(arm.guard)
+        self._emit("    cmp x0, #0")
+        # If guard is false, jump to try next arm
+        self._emit(f"    b.eq {next_arm_labels[i]}")
+
       # Generate arm body
       for stmt in arm.body:
         self._gen_stmt(stmt)
 
       self._emit(f"    b {end_label}")
+
+      # Label for failed guard - try to find another matching arm
+      self._emit(f"{next_arm_labels[i]}:")
+      # Look for next arm with same variant (for multiple guards on same variant)
+      found_next = False
+      for j in range(i + 1, len(arms)):
+        next_arm = arms[j]
+        if next_arm.variant_name == arm.variant_name and next_arm.enum_name == arm.enum_name:
+          # Jump to the next arm's code (it will set up its own binding if needed)
+          self._emit(f"    b {arm_labels[j]}")
+          found_next = True
+          break
+      if not found_next:
+        # No more arms for this variant - this shouldn't happen with exhaustive match
+        # But if it does, fall through to end
+        self._emit(f"    b {end_label}")
 
     self._emit(f"{end_label}:")
     # Match result is in x0 from the last executed arm's return

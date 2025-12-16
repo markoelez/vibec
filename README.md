@@ -130,6 +130,48 @@ fn main() -> i64:
     0
 ```
 
+**Rust-style Pattern Guards:**
+```
+enum Option:
+    Some(i64)
+    None
+
+fn classify(opt: Option) -> i64:
+    match opt:
+        # Pattern guards with 'if' clause
+        Option::Some(x) if x < 0:
+            print(-1)  # Negative
+            -1
+        Option::Some(x) if x == 0:
+            print(0)   # Zero
+            0
+        Option::Some(x) if x < 10:
+            print(1)   # Small positive
+            1
+        Option::Some(x):
+            print(2)   # Large positive (fallback)
+            2
+        Option::None:
+            print(99)
+            99
+
+fn main() -> i64:
+    let a: Option = Option::Some(5)
+    classify(a)  # Prints 1 (small positive)
+    
+    # Guards can use chained comparisons
+    let b: Option = Option::Some(50)
+    match b:
+        Option::Some(x) if 0 < x < 100:
+            print(1)  # In range
+        Option::Some(x):
+            print(0)  # Out of range
+        Option::None:
+            print(-1)
+    
+    0
+```
+
 **Python/Rust-style Hashmaps (dict):**
 ```
 fn main() -> i64:
@@ -300,7 +342,7 @@ fn main() -> i64:
     return 0
 ```
 
-**Supported:** generics (structs, enums, functions, impl blocks) with type inference, type aliases, `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, slice syntax (`v[1:3]`, `v[::2]`, negative indices), chained comparisons (`0 < x < 10`), `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
+**Supported:** generics (structs, enums, functions, impl blocks) with type inference, type aliases, `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, slice syntax (`v[1:3]`, `v[::2]`, negative indices), chained comparisons (`0 < x < 10`), pattern guards (`Some(x) if x > 0:`), `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
 
 
 ## Architecture
@@ -360,7 +402,6 @@ vibec source.vb --keep-asm
 
 ## Todo
 
-- Pattern guards (rust)
 - Traits (rust)
 
 ## License
