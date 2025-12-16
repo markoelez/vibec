@@ -4,6 +4,41 @@
 
 A toy compiled programming language with Python/Rust hybrid syntax, targeting ARM64 macOS.
 
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/markoelez/oxide.git
+cd oxide
+
+# Create virtual environment and install
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+```
+
+## Usage
+
+```bash
+# Compile a source file to executable
+oxide source.ox
+
+# Specify output file
+oxide source.ox -o myprogram
+
+# Output assembly only
+oxide source.ox --emit-asm
+
+# Keep assembly file alongside binary
+oxide source.ox --keep-asm
+```
+
+## Requirements
+
+- Python 3.12+
+- macOS with ARM64 (Apple Silicon)
+- Xcode Command Line Tools (for `as` and `ld`)
+
 ## Language Features
 
 Oxide combines Python's indentation-based blocks with Rust's explicit type annotations:
@@ -462,41 +497,6 @@ Source Code → Lexer → Parser → Type Checker → Code Generator → ARM64 A
 - `cli.py` - Command-line interface
 
 
-## Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/markoelez/oxide.git
-cd oxide
-
-# Create virtual environment and install
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-```
-
-## Usage
-
-```bash
-# Compile a source file to executable
-oxide source.ox
-
-# Specify output file
-oxide source.ox -o myprogram
-
-# Output assembly only
-oxide source.ox --emit-asm
-
-# Keep assembly file alongside binary
-oxide source.ox --keep-asm
-```
-
-## Requirements
-
-- Python 3.12+
-- macOS with ARM64 (Apple Silicon)
-- Xcode Command Line Tools (for `as` and `ld`)
-
 ## Todo
 
 - Traits (rust)
@@ -512,4 +512,3 @@ oxide source.ox --keep-asm
 ## License
 
 MIT
-
