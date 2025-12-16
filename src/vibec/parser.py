@@ -54,6 +54,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  DictComprehension,
   ListComprehension,
 )
 from .tokens import Token, TokenType
@@ -676,29 +677,61 @@ class Parser:
     else:
       raise ParseError(f"Unexpected token '{token.value}'", token)
 
-  def _parse_dict_literal(self) -> DictLiteral:
-    """Parse dict literal: {key: value, ...}."""
+  def _parse_dict_literal(self) -> DictLiteral | DictComprehension:
+    """Parse dict literal {key: value, ...} or dict comprehension {k: v for x in range(...)}."""
     self._expect(TokenType.LBRACE, "Expected '{'")
-    entries: list[tuple[Expr, Expr]] = []
 
-    if not self._check(TokenType.RBRACE):
-      # Parse first entry
+    if self._check(TokenType.RBRACE):
+      # Empty dict
+      self._advance()
+      return DictLiteral(())
+
+    # Parse first key: value
+    key_expr = self._parse_expression()
+    self._expect(TokenType.COLON, "Expected ':' in dict literal")
+    value_expr = self._parse_expression()
+
+    # Check if this is a dict comprehension: {k: v for var in range(...)}
+    if self._check(TokenType.FOR):
+      return self._parse_dict_comprehension(key_expr, value_expr)
+
+    # Regular dict literal
+    entries: list[tuple[Expr, Expr]] = [(key_expr, value_expr)]
+
+    while self._check(TokenType.COMMA):
+      self._advance()
+      if self._check(TokenType.RBRACE):
+        break  # Allow trailing comma
       key = self._parse_expression()
       self._expect(TokenType.COLON, "Expected ':' in dict literal")
       value = self._parse_expression()
       entries.append((key, value))
 
-      while self._check(TokenType.COMMA):
-        self._advance()
-        if self._check(TokenType.RBRACE):
-          break  # Allow trailing comma
-        key = self._parse_expression()
-        self._expect(TokenType.COLON, "Expected ':' in dict literal")
-        value = self._parse_expression()
-        entries.append((key, value))
-
     self._expect(TokenType.RBRACE, "Expected '}'")
     return DictLiteral(tuple(entries))
+
+  def _parse_dict_comprehension(self, key_expr: Expr, value_expr: Expr) -> DictComprehension:
+    """Parse remainder of dict comprehension after key: value: for var in range(start, end) [if cond]}."""
+    self._expect(TokenType.FOR, "Expected 'for'")
+    var_token = self._expect(TokenType.IDENT, "Expected loop variable")
+    self._expect(TokenType.IN, "Expected 'in'")
+
+    # Expect range(start, end)
+    self._expect(TokenType.RANGE, "Expected 'range'")
+    self._expect(TokenType.LPAREN, "Expected '(' after range")
+    start_expr = self._parse_expression()
+    self._expect(TokenType.COMMA, "Expected ',' in range()")
+    end_expr = self._parse_expression()
+    self._expect(TokenType.RPAREN, "Expected ')' after range arguments")
+
+    # Optional condition: if cond
+    condition: Expr | None = None
+    if self._check(TokenType.IF):
+      self._advance()
+      condition = self._parse_expression()
+
+    self._expect(TokenType.RBRACE, "Expected '}'")
+    return DictComprehension(key_expr, value_expr, var_token.value, start_expr, end_expr, condition)
 
   def _parse_postfix(self, expr: Expr) -> Expr:
     """Parse postfix operations: indexing [i], field access .field, tuple index .0, method calls .method(), try ?."""

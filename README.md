@@ -104,6 +104,10 @@ fn main() -> i64:
         print(prices.get(100))  # 50
     prices.insert(300, 100)
     prices.remove(100)
+    
+    # Dict comprehension
+    let squares: dict[i64, i64] = {x: x * x for x in range(0, 5)}
+    let evens: dict[i64, i64] = {x: x * 2 for x in range(0, 10) if x % 2 == 0}
     0
 ```
 
@@ -139,7 +143,7 @@ fn main() -> i64:
     0
 ```
 
-**Supported:** hashmaps (`dict[K,V]`), list comprehensions, `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
+**Supported:** hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
 
 
 ## Architecture

@@ -50,6 +50,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  DictComprehension,
   ListComprehension,
 )
 
@@ -304,6 +305,13 @@ class CodeGenerator:
         for key, value in entries:
           self._collect_strings_from_expr(key)
           self._collect_strings_from_expr(value)
+      case DictComprehension(key_expr, value_expr, _, start, end, condition):
+        self._collect_strings_from_expr(key_expr)
+        self._collect_strings_from_expr(value_expr)
+        self._collect_strings_from_expr(start)
+        self._collect_strings_from_expr(end)
+        if condition is not None:
+          self._collect_strings_from_expr(condition)
       case _:
         pass
 
@@ -1152,6 +1160,10 @@ class CodeGenerator:
         # {key: value, ...}
         self._gen_dict_literal(entries)
 
+      case DictComprehension(key_expr, value_expr, var_name, start, end, condition):
+        # {k: v for var in range(start, end) if condition}
+        self._gen_dict_comprehension(key_expr, value_expr, var_name, start, end, condition)
+
   def _gen_list_comprehension(self, element_expr: Expr, var_name: str, start: Expr, end: Expr, condition: Expr | None) -> None:
     """Generate code for list comprehension: [expr for var in range(start, end) if condition]."""
     # Allocate a temporary vec on stack
@@ -1328,6 +1340,105 @@ class CodeGenerator:
 
     # Return dict pointer
     self._emit("    ldr x0, [sp], #16")
+
+  def _gen_dict_comprehension(
+    self, key_expr: Expr, value_expr: Expr, var_name: str, start: Expr, end: Expr, condition: Expr | None
+  ) -> None:
+    """Generate code for dict comprehension: {k: v for var in range(start, end) if condition}."""
+    # Save any existing binding for var_name (for nested comprehensions or shadowing)
+    old_binding = self.locals.get(var_name)
+    saved_next_slot = self.next_slot
+
+    # Save start and end values to stack
+    self._gen_expr(start)
+    self._emit("    str x0, [sp, #-16]!")  # start at [sp]
+    self._gen_expr(end)
+    self._emit("    str x0, [sp, #-16]!")  # end at [sp], start at [sp+16]
+
+    # Allocate initial dict: malloc(16 + 16*24) for header + 16 entries
+    initial_capacity = 16
+    total_size = 16 + initial_capacity * 24
+    self._emit(f"    mov x0, #{total_size}")
+    self._emit("    bl _malloc")
+    # Store capacity and length in header
+    self._emit(f"    mov x1, #{initial_capacity}")
+    self._emit("    str x1, [x0]")  # capacity = 16
+    self._emit("    str xzr, [x0, #8]")  # length = 0
+    # Zero out occupied flags
+    for i in range(initial_capacity):
+      self._emit(f"    str xzr, [x0, #{16 + i * 24 + 16}]")  # occupied = 0
+    # Save dict ptr to stack
+    self._emit("    str x0, [sp, #-16]!")  # dict_ptr at [sp], end at [sp+16], start at [sp+32]
+
+    # Allocate loop variable
+    loop_var_offset = -16 - (self.next_slot * 8)
+    self.locals[var_name] = (loop_var_offset, "i64")
+    self.next_slot += 1
+
+    # Initialize loop variable with start
+    self._emit("    ldr x0, [sp, #32]")  # Load start
+    self._emit(f"    str x0, [x29, #{loop_var_offset}]")
+
+    # Loop labels
+    loop_start = self._new_label("dc_loop")
+    loop_end = self._new_label("dc_end")
+    cond_skip = self._new_label("dc_skip") if condition else None
+
+    self._emit(f"{loop_start}:")
+
+    # Check loop condition: var < end
+    self._emit(f"    ldr x0, [x29, #{loop_var_offset}]")  # Load var
+    self._emit("    ldr x1, [sp, #16]")  # Load end
+    self._emit("    cmp x0, x1")
+    self._emit(f"    b.ge {loop_end}")
+
+    # If there's a condition, check it
+    if condition is not None:
+      self._gen_expr(condition)
+      self._emit("    cmp x0, #0")
+      self._emit(f"    b.eq {cond_skip}")
+
+    # Evaluate key expression
+    self._gen_expr(key_expr)
+    self._emit("    str x0, [sp, #-16]!")  # Save key
+
+    # Evaluate value expression
+    self._gen_expr(value_expr)
+    self._emit("    mov x2, x0")  # Value in x2
+
+    # Load key and dict ptr
+    self._emit("    ldr x1, [sp], #16")  # Key in x1
+    self._emit("    ldr x0, [sp]")  # Dict ptr in x0
+
+    # Insert into dict (handles growth)
+    self._gen_dict_insert_inline()
+
+    # Update dict pointer on stack (may have changed due to growth)
+    self._emit("    str x0, [sp]")
+
+    # Skip label for condition
+    if cond_skip is not None:
+      self._emit(f"{cond_skip}:")
+
+    # Increment loop variable
+    self._emit(f"    ldr x0, [x29, #{loop_var_offset}]")
+    self._emit("    add x0, x0, #1")
+    self._emit(f"    str x0, [x29, #{loop_var_offset}]")
+    self._emit(f"    b {loop_start}")
+
+    self._emit(f"{loop_end}:")
+
+    # Return dict pointer
+    self._emit("    ldr x0, [sp]")
+    # Clean up stack (dict_ptr, end, start)
+    self._emit("    add sp, sp, #48")
+
+    # Restore old binding if any
+    if old_binding is not None:
+      self.locals[var_name] = old_binding
+    else:
+      del self.locals[var_name]
+    self.next_slot = saved_next_slot
 
   def _gen_dict_insert_inline(self) -> None:
     """Generate inline dict insert: x0=dict_ptr, x1=key, x2=value.

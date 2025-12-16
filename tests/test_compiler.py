@@ -3128,3 +3128,59 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 45  # 0 + 1 + ... + 9 = 45
+
+  # === Dict comprehension tests ===
+
+  def test_dict_comprehension_basic(self):
+    """Test basic dict comprehension."""
+    source = """fn main() -> i64:
+    let squares: dict[i64, i64] = {x: x * x for x in range(0, 5)}
+    squares[0] + squares[1] + squares[2] + squares[3] + squares[4]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30  # 0 + 1 + 4 + 9 + 16 = 30
+
+  def test_dict_comprehension_with_condition(self):
+    """Test dict comprehension with if filter."""
+    source = """fn main() -> i64:
+    let evens: dict[i64, i64] = {x: x * 2 for x in range(0, 10) if x % 2 == 0}
+    evens.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 5  # 0, 2, 4, 6, 8
+
+  def test_dict_comprehension_expression(self):
+    """Test dict comprehension with complex expressions."""
+    source = """fn main() -> i64:
+    let d: dict[i64, i64] = {x + 10: x * 3 for x in range(0, 3)}
+    d[10] + d[11] + d[12]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 9  # 0 + 3 + 6 = 9
+
+  def test_dict_comprehension_len(self):
+    """Test length of dict from comprehension."""
+    source = """fn main() -> i64:
+    let d: dict[i64, i64] = {x: x for x in range(0, 10)}
+    d.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 10
+
+  def test_dict_comprehension_lookup(self):
+    """Test looking up values in dict comprehension result."""
+    source = """fn main() -> i64:
+    let cubes: dict[i64, i64] = {x: x * x * x for x in range(1, 6)}
+    cubes[3]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 27  # 3^3 = 27
+
+  def test_dict_comprehension_growing(self):
+    """Test dict comprehension that needs to grow."""
+    source = """fn main() -> i64:
+    let d: dict[i64, i64] = {x: x for x in range(0, 30)}
+    d.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30

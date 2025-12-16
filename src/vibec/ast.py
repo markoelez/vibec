@@ -280,6 +280,18 @@ class ListComprehension:
   condition: "Expr | None"  # Optional filter condition
 
 
+@dataclass(frozen=True, slots=True)
+class DictComprehension:
+  """Dict comprehension: {key: value for var in range(start, end) if cond}."""
+
+  key_expr: "Expr"  # Expression for key
+  value_expr: "Expr"  # Expression for value
+  var_name: str  # Loop variable name
+  start: "Expr"  # Range start
+  end: "Expr"  # Range end
+  condition: "Expr | None"  # Optional filter condition
+
+
 # Expression union type
 Expr = (
   IntLiteral
@@ -307,6 +319,7 @@ Expr = (
   | DictLiteral
   | TryExpr
   | ListComprehension
+  | DictComprehension
 )
 
 

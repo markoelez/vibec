@@ -52,5 +52,15 @@ fn main() -> i64:
     print(big.len())  # 20
     print(big[15])  # 150
     
+    # Dict comprehension (Python-style)
+    let squares: dict[i64, i64] = {x: x * x for x in range(0, 5)}
+    print(squares[4])  # 16
+    print(squares.len())  # 5
+    
+    # Dict comprehension with filter
+    let even_cubes: dict[i64, i64] = {x: x * x * x for x in range(0, 10) if x % 2 == 0}
+    print(even_cubes.len())  # 5 (0, 2, 4, 6, 8)
+    print(even_cubes[4])  # 64
+    
     return 0
 

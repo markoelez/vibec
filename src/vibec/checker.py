@@ -50,6 +50,7 @@ from .ast import (
   FieldAccessExpr,
   FieldAssignStmt,
   IndexAssignStmt,
+  DictComprehension,
   ListComprehension,
 )
 
@@ -1272,6 +1273,37 @@ class TypeChecker:
             raise TypeError(f"Dict value type mismatch: expected {first_value_type}, got {value_type}")
 
         return f"dict[{first_key_type},{first_value_type}]"
+
+      case DictComprehension(key_expr, value_expr, var_name, start, end, condition):
+        # {k: v for var in range(start, end) if condition}
+        # Check range bounds
+        start_type = self._check_expr(start)
+        end_type = self._check_expr(end)
+        if start_type != "i64":
+          raise TypeError(f"Range start must be i64, got {start_type}")
+        if end_type != "i64":
+          raise TypeError(f"Range end must be i64, got {end_type}")
+
+        # Create scope with loop variable
+        self._enter_scope()
+        self._define_var(var_name, "i64")
+
+        # Check key expression
+        key_type = self._check_expr(key_expr)
+        if key_type not in ("i64", "str"):
+          raise TypeError(f"Dict keys must be i64 or str, got {key_type}")
+
+        # Check value expression
+        value_type = self._check_expr(value_expr)
+
+        # Check condition if present
+        if condition is not None:
+          cond_type = self._check_expr(condition)
+          if cond_type != "bool":
+            raise TypeError(f"Dict comprehension condition must be bool, got {cond_type}")
+
+        self._exit_scope()
+        return f"dict[{key_type},{value_type}]"
 
     raise TypeError(f"Unknown expression type: {type(expr)}")
 
