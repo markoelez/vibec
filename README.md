@@ -1,12 +1,12 @@
-# Vibec
+# Oxide
 
-[![CI](https://github.com/markoelez/vibec/actions/workflows/ci.yml/badge.svg)](https://github.com/markoelez/vibec/actions/workflows/ci.yml)
+[![CI](https://github.com/markoelez/oxide/actions/workflows/ci.yml/badge.svg)](https://github.com/markoelez/oxide/actions/workflows/ci.yml)
 
 A toy compiled programming language with Python/Rust hybrid syntax, targeting ARM64 macOS.
 
 ## Language Features
 
-Vibec combines Python's indentation-based blocks with Rust's explicit type annotations:
+Oxide combines Python's indentation-based blocks with Rust's explicit type annotations:
 
 ```
 # Ownership and borrowing (like Rust)
@@ -466,8 +466,8 @@ Source Code → Lexer → Parser → Type Checker → Code Generator → ARM64 A
 
 ```bash
 # Clone the repository
-git clone https://github.com/markoelez/vibec.git
-cd vibec
+git clone https://github.com/markoelez/oxide.git
+cd oxide
 
 # Create virtual environment and install
 uv venv
@@ -479,16 +479,16 @@ uv pip install -e .
 
 ```bash
 # Compile a source file to executable
-vibec source.vb
+oxide source.ox
 
 # Specify output file
-vibec source.vb -o myprogram
+oxide source.ox -o myprogram
 
 # Output assembly only
-vibec source.vb --emit-asm
+oxide source.ox --emit-asm
 
 # Keep assembly file alongside binary
-vibec source.vb --keep-asm
+oxide source.ox --keep-asm
 ```
 
 ## Requirements

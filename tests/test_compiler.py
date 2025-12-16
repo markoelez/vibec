@@ -1,4 +1,4 @@
-"""Tests for the Vibec compiler."""
+"""Tests for the Oxide compiler."""
 
 import tempfile
 import subprocess
@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from vibec.lexer import tokenize
-from vibec.parser import parse
-from vibec.tokens import TokenType
-from vibec.checker import check
-from vibec.codegen import generate
+from oxide.lexer import tokenize
+from oxide.parser import parse
+from oxide.tokens import TokenType
+from oxide.checker import check
+from oxide.codegen import generate
 
 
 class TestLexer:
@@ -183,7 +183,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt
+    from oxide.ast import LetStmt
 
     assert isinstance(ast.functions[0].body[0], LetStmt)
 
@@ -195,7 +195,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import IfStmt
+    from oxide.ast import IfStmt
 
     assert isinstance(ast.functions[0].body[0], IfStmt)
 
@@ -207,7 +207,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import WhileStmt
+    from oxide.ast import WhileStmt
 
     assert isinstance(ast.functions[0].body[0], WhileStmt)
 
@@ -218,7 +218,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import CallExpr, ExprStmt, StringLiteral
+    from oxide.ast import CallExpr, ExprStmt, StringLiteral
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, ExprStmt)
@@ -234,7 +234,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import AssignStmt
+    from oxide.ast import AssignStmt
 
     assert isinstance(ast.functions[0].body[1], AssignStmt)
     assert ast.functions[0].body[1].name == "x"
@@ -247,7 +247,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ForStmt
+    from oxide.ast import ForStmt
 
     assert isinstance(ast.functions[0].body[0], ForStmt)
     assert ast.functions[0].body[0].var == "i"
@@ -260,7 +260,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ForStmt, IntLiteral
+    from oxide.ast import ForStmt, IntLiteral
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, ForStmt)
@@ -274,7 +274,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, ArrayType
+    from oxide.ast import LetStmt, ArrayType
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -288,7 +288,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, VecType
+    from oxide.ast import LetStmt, VecType
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -301,7 +301,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import IndexExpr, ReturnStmt
+    from oxide.ast import IndexExpr, ReturnStmt
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ReturnStmt)
@@ -315,7 +315,7 @@ class TestParser:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ExprStmt, MethodCallExpr
+    from oxide.ast import ExprStmt, MethodCallExpr
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ExprStmt)
@@ -332,7 +332,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import StructDef
+    from oxide.ast import StructDef
 
     assert len(ast.structs) == 1
     struct = ast.structs[0]
@@ -353,7 +353,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, StructLiteral
+    from oxide.ast import LetStmt, StructLiteral
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -372,7 +372,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ReturnStmt, FieldAccessExpr
+    from oxide.ast import ReturnStmt, FieldAccessExpr
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ReturnStmt)
@@ -385,7 +385,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, TupleType
+    from oxide.ast import LetStmt, TupleType
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -399,7 +399,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, TupleLiteral
+    from oxide.ast import LetStmt, TupleLiteral
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -413,7 +413,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ReturnStmt, TupleIndexExpr
+    from oxide.ast import ReturnStmt, TupleIndexExpr
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ReturnStmt)
@@ -430,7 +430,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import EnumDef
+    from oxide.ast import EnumDef
 
     assert len(ast.enums) == 1
     enum = ast.enums[0]
@@ -453,7 +453,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, EnumLiteral
+    from oxide.ast import LetStmt, EnumLiteral
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -476,7 +476,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ExprStmt, MatchExpr
+    from oxide.ast import ExprStmt, MatchExpr
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, ExprStmt)
@@ -497,7 +497,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import ImplBlock
+    from oxide.ast import ImplBlock
 
     assert len(ast.impls) == 1
     impl = ast.impls[0]
@@ -519,7 +519,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import Parameter, SimpleType
+    from oxide.ast import Parameter, SimpleType
 
     method = ast.impls[0].methods[0]
     assert len(method.params) == 1
@@ -537,7 +537,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import RefType, SimpleType
+    from oxide.ast import RefType, SimpleType
 
     param = ast.functions[0].params[0]
     assert isinstance(param.type_ann, RefType)
@@ -555,7 +555,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import RefType, SimpleType
+    from oxide.ast import RefType, SimpleType
 
     param = ast.functions[0].params[0]
     assert isinstance(param.type_ann, RefType)
@@ -570,7 +570,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, RefExpr, VarExpr
+    from oxide.ast import LetStmt, RefExpr, VarExpr
 
     stmt = ast.functions[0].body[1]
     assert isinstance(stmt, LetStmt)
@@ -587,7 +587,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import DerefAssignStmt
+    from oxide.ast import DerefAssignStmt
 
     stmt = ast.functions[0].body[2]
     assert isinstance(stmt, DerefAssignStmt)
@@ -601,7 +601,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import FnType, LetStmt, ClosureExpr
+    from oxide.ast import FnType, LetStmt, ClosureExpr
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -616,7 +616,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import LetStmt, ClosureExpr
+    from oxide.ast import LetStmt, ClosureExpr
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -630,7 +630,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import FnType, LetStmt, SimpleType
+    from oxide.ast import FnType, LetStmt, SimpleType
 
     stmt = ast.functions[0].body[0]
     assert isinstance(stmt, LetStmt)
@@ -650,7 +650,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import CallExpr, ReturnStmt
+    from oxide.ast import CallExpr, ReturnStmt
 
     ret_stmt = ast.functions[1].body[0]
     assert isinstance(ret_stmt, ReturnStmt)
@@ -671,7 +671,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import CallExpr, IntLiteral, ReturnStmt
+    from oxide.ast import CallExpr, IntLiteral, ReturnStmt
 
     ret_stmt = ast.functions[1].body[0]
     assert isinstance(ret_stmt, ReturnStmt)
@@ -694,7 +694,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import CallExpr, BinaryExpr, ReturnStmt
+    from oxide.ast import CallExpr, BinaryExpr, ReturnStmt
 
     ret_stmt = ast.functions[1].body[1]
     assert isinstance(ret_stmt, ReturnStmt)
@@ -715,7 +715,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.ast import CallExpr, ReturnStmt
+    from oxide.ast import CallExpr, ReturnStmt
 
     ret_stmt = ast.functions[2].body[0]
     assert isinstance(ret_stmt, ReturnStmt)
@@ -733,7 +733,7 @@ fn main() -> i64:
     return add(a=1, 2)
 """
     tokens = tokenize(source)
-    from vibec.parser import ParseError
+    from oxide.parser import ParseError
 
     with pytest.raises(ParseError, match="Positional argument cannot follow keyword argument"):
       parse(tokens)
@@ -747,7 +747,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -758,7 +758,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -769,7 +769,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -780,7 +780,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -811,7 +811,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -834,7 +834,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -846,7 +846,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -869,7 +869,7 @@ class TestChecker:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -898,7 +898,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -914,7 +914,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -930,7 +930,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -942,7 +942,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -963,7 +963,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -975,7 +975,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1000,7 +1000,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1016,7 +1016,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1032,7 +1032,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1048,7 +1048,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1064,7 +1064,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1099,7 +1099,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Non-exhaustive match"):
       check(ast)
@@ -1131,7 +1131,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="unknown type 'Unknown'"):
       check(ast)
@@ -1146,7 +1146,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1179,7 +1179,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot dereference non-reference"):
       check(ast)
@@ -1193,7 +1193,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot assign through non-mutable reference"):
       check(ast)
@@ -1206,7 +1206,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1226,7 +1226,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Use of moved variable"):
       check(ast)
@@ -1272,7 +1272,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Use of moved variable"):
       check(ast)
@@ -1286,7 +1286,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="already borrowed as mutable"):
       check(ast)
@@ -1300,7 +1300,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="already borrowed as immutable"):
       check(ast)
@@ -1314,7 +1314,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="already borrowed as mutable"):
       check(ast)
@@ -1340,7 +1340,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="currently borrowed"):
       check(ast)
@@ -1362,7 +1362,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot move .* inside a loop"):
       check(ast)
@@ -1382,7 +1382,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot move .* inside a loop"):
       check(ast)
@@ -1420,7 +1420,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError):
       check(ast)
@@ -1432,7 +1432,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="expects 2 arguments"):
       check(ast)
@@ -1444,7 +1444,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="expects i64"):
       check(ast)
@@ -1496,7 +1496,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Unknown keyword argument 'x'"):
       check(ast)
@@ -1510,7 +1510,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Duplicate argument for parameter 'a'"):
       check(ast)
@@ -1524,7 +1524,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Argument 'b' of 'add' expects bool, got i64"):
       check(ast)
@@ -1538,7 +1538,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="expects 3 arguments, got 2"):
       check(ast)
@@ -1552,7 +1552,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="expects 2 arguments, got 3"):
       check(ast)
@@ -1568,7 +1568,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Implicit return type bool doesn't match function return type i64"):
       check(ast)
@@ -1595,7 +1595,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot assign to const variable 'x'"):
       check(ast)
@@ -1609,7 +1609,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot assign to const variable 'arr'"):
       check(ast)
@@ -1626,7 +1626,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot assign to const variable 'p'"):
       check(ast)
@@ -1652,7 +1652,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Unknown type 'Unknown'"):
       check(ast)
@@ -1666,7 +1666,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Type alias 'MyInt' already defined"):
       check(ast)
@@ -1679,7 +1679,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot create type alias for built-in type 'i64'"):
       check(ast)
@@ -1695,7 +1695,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="'Point' already defined as a struct"):
       check(ast)
@@ -1723,7 +1723,7 @@ class TestEndToEnd:
 
   def _compile_and_run(self, source: str) -> tuple[int, str]:
     """Compile source and run the binary, returning (exit_code, stdout)."""
-    from vibec.compiler import Compiler
+    from oxide.compiler import Compiler
 
     with tempfile.TemporaryDirectory() as tmpdir:
       output_path = Path(tmpdir) / "test_binary"
@@ -3595,7 +3595,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="requires type arguments"):
       check(ast)
@@ -3612,7 +3612,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="expects 2 type args, got 1"):
       check(ast)
@@ -3629,7 +3629,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="requires type arguments"):
       check(ast)
@@ -3701,7 +3701,7 @@ fn main() -> i64:
 """
     tokens = tokenize(source)
     ast = parse(tokens)
-    from vibec.checker import TypeError
+    from oxide.checker import TypeError
 
     with pytest.raises(TypeError, match="Cannot infer type"):
       check(ast)
@@ -4677,7 +4677,7 @@ fn bad(opt: Option<i64>) -> i64:
 fn main() -> i64:
     0
 """
-    from vibec.checker import TypeError as CheckerTypeError
+    from oxide.checker import TypeError as CheckerTypeError
 
     tokens = tokenize(source)
     ast = parse(tokens)
@@ -4697,7 +4697,7 @@ fn bad(opt: Option<i64>) -> Option<bool>:
 fn main() -> i64:
     0
 """
-    from vibec.checker import TypeError as CheckerTypeError
+    from oxide.checker import TypeError as CheckerTypeError
 
     tokens = tokenize(source)
     ast = parse(tokens)

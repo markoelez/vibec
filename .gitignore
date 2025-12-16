@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-# Vibec compiler output
+# Oxide compiler output
 *.o
 *.s
 examples/factorial

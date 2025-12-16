@@ -1,4 +1,4 @@
-"""Command-line interface for the Vibec compiler."""
+"""Command-line interface for the Oxide compiler."""
 
 import sys
 import argparse
@@ -8,12 +8,12 @@ from .compiler import Compiler
 
 
 def main() -> int:
-  """Main entry point for the vibec compiler."""
+  """Main entry point for the oxide compiler."""
   parser = argparse.ArgumentParser(
-    prog="vibec",
-    description="Vibec compiler - A Python/Rust hybrid language for ARM64 macOS",
+    prog="oxide",
+    description="Oxide compiler - A Python/Rust hybrid language for ARM64 macOS",
   )
-  parser.add_argument("source", type=Path, help="Source file to compile (.vb)")
+  parser.add_argument("source", type=Path, help="Source file to compile (.ox)")
   parser.add_argument("-o", "--output", type=Path, help="Output file (default: source name without extension)")
   parser.add_argument(
     "--emit-asm",
