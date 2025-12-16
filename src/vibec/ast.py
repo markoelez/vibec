@@ -66,8 +66,16 @@ class DictType:
   value_type: "TypeAnnotation"
 
 
+@dataclass(frozen=True, slots=True)
+class GenericType:
+  """Parameterized type like Pair<i64, str>."""
+
+  name: str
+  type_args: tuple["TypeAnnotation", ...]
+
+
 # Type annotation union
-TypeAnnotation = SimpleType | ArrayType | VecType | TupleType | RefType | FnType | ResultType | DictType
+TypeAnnotation = SimpleType | ArrayType | VecType | TupleType | RefType | FnType | ResultType | DictType | GenericType
 
 
 # === Expressions ===
@@ -153,9 +161,10 @@ class MethodCallExpr:
 
 @dataclass(frozen=True, slots=True)
 class StructLiteral:
-  """Struct literal like Point { x: 10, y: 20 }."""
+  """Struct literal like Point { x: 10, y: 20 } or Pair<i64, str> { first: 10, second: "hello" }."""
 
   name: str
+  type_args: tuple["TypeAnnotation", ...]  # Generic type arguments (empty for non-generic)
   fields: tuple[tuple[str, "Expr"], ...]  # (field_name, value) pairs
 
 
@@ -184,9 +193,10 @@ class TupleIndexExpr:
 
 @dataclass(frozen=True, slots=True)
 class EnumLiteral:
-  """Enum variant instantiation like Option::Some(42) or Option::None."""
+  """Enum variant instantiation like Option<i64>::Some(42) or Option<i64>::None."""
 
   enum_name: str
+  type_args: tuple["TypeAnnotation", ...]  # Generic type arguments (empty for non-generic)
   variant_name: str
   payload: "Expr | None"  # None for unit variants
 
@@ -431,6 +441,7 @@ class Function:
   """Function definition."""
 
   name: str
+  type_params: tuple[str, ...]  # Generic type parameters like ["T", "U"]
   params: tuple[Parameter, ...]
   return_type: TypeAnnotation
   body: tuple[Stmt, ...]
@@ -446,9 +457,10 @@ class StructField:
 
 @dataclass(frozen=True, slots=True)
 class StructDef:
-  """Struct definition: struct Point: x: i64, y: i64"""
+  """Struct definition: struct Point: x: i64, y: i64 or struct Pair<T, U>: first: T, second: U"""
 
   name: str
+  type_params: tuple[str, ...]  # Generic type parameters like ["T", "U"]
   fields: tuple[StructField, ...]
 
 
@@ -462,24 +474,35 @@ class EnumVariant:
 
 @dataclass(frozen=True, slots=True)
 class EnumDef:
-  """Enum definition: enum Option: Some(i64), None"""
+  """Enum definition: enum Option<T>: Some(T), None"""
 
   name: str
+  type_params: tuple[str, ...]  # Generic type parameters like ["T"]
   variants: tuple[EnumVariant, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class ImplBlock:
-  """Implementation block: impl StructName: fn method(self, ...) -> ..."""
+  """Implementation block: impl StructName<T, U>: fn method(self, ...) -> ..."""
 
   struct_name: str
+  type_params: tuple[str, ...]  # Generic type parameters like ["T", "U"]
   methods: tuple[Function, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class Program:
-  """Root node containing structs, enums, impl blocks, and functions."""
+class TypeAlias:
+  """Type alias: type Name = ExistingType"""
 
+  name: str
+  target: TypeAnnotation
+
+
+@dataclass(frozen=True, slots=True)
+class Program:
+  """Root node containing type aliases, structs, enums, impl blocks, and functions."""
+
+  type_aliases: tuple[TypeAlias, ...]
   structs: tuple[StructDef, ...]
   enums: tuple[EnumDef, ...]
   impls: tuple[ImplBlock, ...]

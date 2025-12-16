@@ -1642,6 +1642,77 @@ fn main() -> i64:
     ast = parse(tokens)
     check(ast)  # Should not raise
 
+  # === Type alias checker tests ===
+
+  def test_type_alias_unknown_type_error(self):
+    """Test that type alias to unknown type raises error."""
+    source = """type MyType = Unknown
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Unknown type 'Unknown'"):
+      check(ast)
+
+  def test_type_alias_duplicate_error(self):
+    """Test that duplicate type alias raises error."""
+    source = """type MyInt = i64
+type MyInt = bool
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Type alias 'MyInt' already defined"):
+      check(ast)
+
+  def test_type_alias_builtin_override_error(self):
+    """Test that type alias cannot override built-in type."""
+    source = """type i64 = bool
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="Cannot create type alias for built-in type 'i64'"):
+      check(ast)
+
+  def test_type_alias_conflicts_struct_error(self):
+    """Test that type alias cannot have same name as struct."""
+    source = """struct Point:
+    x: i64
+    y: i64
+type Point = (i64, i64)
+fn main() -> i64:
+    return 0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="'Point' already defined as a struct"):
+      check(ast)
+
+  def test_type_alias_valid(self):
+    """Test that valid type alias passes type checking."""
+    source = """type Int = i64
+type Pair = (Int, Int)
+fn main() -> Int:
+    let x: Int = 10
+    let p: Pair = (1, 2)
+    return x
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    check(ast)  # Should not raise
+
 
 @pytest.mark.skipif(
   subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip() != "arm64",
@@ -3295,3 +3366,398 @@ fn main() -> i64:
 """
     exit_code, _ = self._compile_and_run(source)
     assert exit_code == 20
+
+  # === Type alias tests ===
+
+  def test_type_alias_simple(self):
+    """Test basic type alias for i64."""
+    source = """type Int = i64
+fn main() -> i64:
+    let x: Int = 42
+    x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_type_alias_vector(self):
+    """Test type alias for vec type."""
+    source = """type IntVec = vec[i64]
+fn main() -> i64:
+    let v: IntVec = []
+    v.push(1)
+    v.push(2)
+    v.push(3)
+    v.len()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 3
+
+  def test_type_alias_array(self):
+    """Test type alias for array type."""
+    source = """type Point3D = [i64; 3]
+fn main() -> i64:
+    let p: Point3D = [1, 2, 3]
+    p[0] + p[1] + p[2]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 6
+
+  def test_type_alias_tuple(self):
+    """Test type alias for tuple type."""
+    source = """type Pair = (i64, i64)
+fn main() -> i64:
+    let p: Pair = (10, 20)
+    p.0 + p.1
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_type_alias_dict(self):
+    """Test type alias for dict type."""
+    source = """type IntMap = dict[i64, i64]
+fn main() -> i64:
+    let m: IntMap = {}
+    m[1] = 50
+    m[2] = 75
+    m[1] + m[2]
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 125
+
+  def test_type_alias_result(self):
+    """Test type alias for Result type."""
+    source = """type MyResult = Result[i64, i64]
+fn maybe_fail(x: i64) -> MyResult:
+    if x > 0:
+        return Ok(x * 2)
+    Err(1)
+fn main() -> i64:
+    let r: MyResult = maybe_fail(5)
+    match r:
+        Ok(v):
+            v
+        Err(e):
+            e
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 10
+
+  def test_type_alias_in_function_params(self):
+    """Test type alias in function parameters."""
+    source = """type Number = i64
+fn add(a: Number, b: Number) -> Number:
+    a + b
+fn main() -> i64:
+    add(10, 20)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_type_alias_chained(self):
+    """Test type aliases that reference other aliases."""
+    source = """type Int = i64
+type MyInt = Int
+fn main() -> i64:
+    let x: MyInt = 42
+    x
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_type_alias_nested(self):
+    """Test type alias with nested generic types."""
+    source = """type IntVec = vec[i64]
+fn main() -> i64:
+    let v: IntVec = []
+    v.push(1)
+    v.push(2)
+    v.push(3)
+    v.sum()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 6
+
+  def test_type_alias_with_struct(self):
+    """Test type alias that references a struct."""
+    source = """struct Point:
+    x: i64
+    y: i64
+type P = Point
+fn main() -> i64:
+    let p: P = Point { x: 10, y: 20 }
+    p.x + p.y
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  # === Generic Struct Tests ===
+
+  def test_generic_struct_basic(self):
+    """Test basic generic struct with one type parameter."""
+    source = """struct Box<T>:
+    value: T
+
+fn main() -> i64:
+    let b: Box<i64> = Box<i64> { value: 42 }
+    b.value
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_generic_struct_two_params(self):
+    """Test generic struct with two type parameters."""
+    source = """struct Pair<T, U>:
+    first: T
+    second: U
+
+fn main() -> i64:
+    let p: Pair<i64, i64> = Pair<i64, i64> { first: 10, second: 20 }
+    p.first + p.second
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_generic_struct_multiple_instantiations(self):
+    """Test same generic struct with different type arguments."""
+    source = """struct Box<T>:
+    value: T
+
+fn main() -> i64:
+    let b1: Box<i64> = Box<i64> { value: 10 }
+    let b2: Box<bool> = Box<bool> { value: true }
+    if b2.value:
+        b1.value + 5
+    else:
+        b1.value
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 15
+
+  def test_generic_struct_nested(self):
+    """Test nested generic struct instantiation."""
+    source = """struct Box<T>:
+    value: T
+
+fn main() -> i64:
+    let inner: Box<i64> = Box<i64> { value: 42 }
+    let outer: Box<Box<i64>> = Box<Box<i64>> { value: inner }
+    outer.value.value
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  # === Generic Enum Tests ===
+
+  def test_generic_enum_basic(self):
+    """Test basic generic enum with one type parameter."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn main() -> i64:
+    let opt: Option<i64> = Option<i64>::Some(42)
+    match opt:
+        Option<i64>::Some(val):
+            val
+        Option<i64>::None:
+            0
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_generic_enum_none_variant(self):
+    """Test generic enum with unit variant."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn main() -> i64:
+    let opt: Option<i64> = Option<i64>::None
+    match opt:
+        Option<i64>::Some(val):
+            val
+        Option<i64>::None:
+            99
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 99
+
+  # === Generic Error Tests ===
+
+  def test_generic_struct_missing_type_args_error(self):
+    """Test error when generic struct is used without type args."""
+    source = """struct Box<T>:
+    value: T
+
+fn main() -> i64:
+    let b: Box = Box { value: 42 }
+    0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="requires type arguments"):
+      check(ast)
+
+  def test_generic_struct_wrong_type_arg_count_error(self):
+    """Test error when wrong number of type args provided."""
+    source = """struct Pair<T, U>:
+    first: T
+    second: U
+
+fn main() -> i64:
+    let p: Pair<i64> = Pair<i64> { first: 10, second: 20 }
+    0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="expects 2 type args, got 1"):
+      check(ast)
+
+  def test_generic_enum_missing_type_args_error(self):
+    """Test error when generic enum is used without type args."""
+    source = """enum Option<T>:
+    Some(T)
+    None
+
+fn main() -> i64:
+    let opt: Option = Option::Some(42)
+    0
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="requires type arguments"):
+      check(ast)
+
+  # === Generic Function Tests ===
+
+  def test_generic_function_basic(self):
+    """Test basic generic function with explicit type args."""
+    source = """fn identity<T>(x: T) -> T:
+    x
+
+fn main() -> i64:
+    identity<i64>(42)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_generic_function_multiple_params(self):
+    """Test generic function with multiple type parameters."""
+    source = """fn first<T, U>(a: T, b: U) -> T:
+    a
+
+fn main() -> i64:
+    first<i64, bool>(100, true)
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 100
+
+  def test_generic_function_multiple_instantiations(self):
+    """Test same generic function with different type arguments."""
+    source = """fn identity<T>(x: T) -> T:
+    x
+
+fn main() -> i64:
+    let a: i64 = identity<i64>(10)
+    let b: bool = identity<bool>(true)
+    if b:
+        a + 5
+    else:
+        a
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 15
+
+  def test_generic_function_with_generic_struct(self):
+    """Test generic function that takes a generic struct."""
+    source = """struct Box<T>:
+    value: T
+
+fn unbox<T>(b: Box<T>) -> T:
+    b.value
+
+fn main() -> i64:
+    # Create inline to avoid move issue
+    unbox<i64>(Box<i64> { value: 42 })
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_generic_function_missing_type_args_error(self):
+    """Test error when generic function called without type args."""
+    source = """fn identity<T>(x: T) -> T:
+    x
+
+fn main() -> i64:
+    identity(42)
+"""
+    tokens = tokenize(source)
+    ast = parse(tokens)
+    from vibec.checker import TypeError
+
+    with pytest.raises(TypeError, match="requires explicit type arguments"):
+      check(ast)
+
+  # === Generic Impl Block Tests ===
+
+  def test_generic_impl_basic(self):
+    """Test basic generic impl block with method."""
+    source = """struct Box<T>:
+    value: T
+
+impl Box<T>:
+    fn get(self: Box<T>) -> T:
+        self.value
+
+fn main() -> i64:
+    let b: Box<i64> = Box<i64> { value: 42 }
+    b.get()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 42
+
+  def test_generic_impl_multiple_methods(self):
+    """Test generic impl block with multiple methods."""
+    source = """struct Pair<T, U>:
+    first: T
+    second: U
+
+impl Pair<T, U>:
+    fn get_first(self: Pair<T, U>) -> T:
+        self.first
+
+    fn get_second(self: Pair<T, U>) -> U:
+        self.second
+
+fn main() -> i64:
+    let p: Pair<i64, i64> = Pair<i64, i64> { first: 10, second: 20 }
+    p.get_first() + p.get_second()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 30
+
+  def test_generic_impl_multiple_instantiations(self):
+    """Test same generic impl with different type arguments."""
+    source = """struct Box<T>:
+    value: T
+
+impl Box<T>:
+    fn get(self: Box<T>) -> T:
+        self.value
+
+fn main() -> i64:
+    let b1: Box<i64> = Box<i64> { value: 10 }
+    let b2: Box<bool> = Box<bool> { value: true }
+    if b2.get():
+        b1.get() + 5
+    else:
+        b1.get()
+"""
+    exit_code, _ = self._compile_and_run(source)
+    assert exit_code == 15

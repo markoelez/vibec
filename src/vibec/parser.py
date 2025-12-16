@@ -29,6 +29,7 @@ from .ast import (
   Parameter,
   StructDef,
   TupleType,
+  TypeAlias,
   UnaryExpr,
   WhileStmt,
   AssignStmt,
@@ -42,6 +43,7 @@ from .ast import (
   DictLiteral,
   EnumLiteral,
   EnumVariant,
+  GenericType,
   StructField,
   ArrayLiteral,
   TupleLiteral,
@@ -144,6 +146,7 @@ class Parser:
 
   def parse(self) -> Program:
     """Parse the entire program."""
+    type_aliases: list[TypeAlias] = []
     structs: list[StructDef] = []
     enums: list[EnumDef] = []
     impls: list[ImplBlock] = []
@@ -151,7 +154,9 @@ class Parser:
     self._skip_newlines()
 
     while not self._at_end():
-      if self._check(TokenType.STRUCT):
+      if self._check(TokenType.TYPE):
+        type_aliases.append(self._parse_type_alias())
+      elif self._check(TokenType.STRUCT):
         structs.append(self._parse_struct())
       elif self._check(TokenType.ENUM):
         enums.append(self._parse_enum())
@@ -160,15 +165,28 @@ class Parser:
       elif self._check(TokenType.FN):
         functions.append(self._parse_function())
       else:
-        raise ParseError("Expected 'struct', 'enum', 'impl', or 'fn'", self._current())
+        raise ParseError("Expected 'type', 'struct', 'enum', 'impl', or 'fn'", self._current())
       self._skip_newlines()
 
-    return Program(tuple(structs), tuple(enums), tuple(impls), tuple(functions))
+    return Program(tuple(type_aliases), tuple(structs), tuple(enums), tuple(impls), tuple(functions))
+
+  def _parse_type_alias(self) -> TypeAlias:
+    """Parse: type Name = ExistingType"""
+    self._expect(TokenType.TYPE, "Expected 'type'")
+    name_token = self._expect(TokenType.IDENT, "Expected type alias name")
+    self._expect(TokenType.ASSIGN, "Expected '='")
+    target = self._parse_type()
+    self._expect(TokenType.NEWLINE, "Expected newline after type alias")
+    return TypeAlias(name_token.value, target)
 
   def _parse_struct(self) -> StructDef:
-    """Parse: struct Name: INDENT field: type ... DEDENT"""
+    """Parse: struct Name<T, U>: INDENT field: type ... DEDENT"""
     self._expect(TokenType.STRUCT, "Expected 'struct'")
     name_token = self._expect(TokenType.IDENT, "Expected struct name")
+
+    # Parse optional type parameters: <T, U>
+    type_params = self._parse_type_params()
+
     self._expect(TokenType.COLON, "Expected ':'")
     self._expect(TokenType.NEWLINE, "Expected newline after ':'")
     self._expect(TokenType.INDENT, "Expected indented block")
@@ -185,12 +203,16 @@ class Parser:
       fields.append(StructField(field_name.value, field_type))
 
     self._expect(TokenType.DEDENT, "Expected dedent")
-    return StructDef(name_token.value, tuple(fields))
+    return StructDef(name_token.value, tuple(type_params), tuple(fields))
 
   def _parse_enum(self) -> EnumDef:
-    """Parse: enum Name: INDENT Variant1(Type) Variant2 ... DEDENT"""
+    """Parse: enum Name<T>: INDENT Variant1(Type) Variant2 ... DEDENT"""
     self._expect(TokenType.ENUM, "Expected 'enum'")
     name_token = self._expect(TokenType.IDENT, "Expected enum name")
+
+    # Parse optional type parameters: <T>
+    type_params = self._parse_type_params()
+
     self._expect(TokenType.COLON, "Expected ':'")
     self._expect(TokenType.NEWLINE, "Expected newline after ':'")
     self._expect(TokenType.INDENT, "Expected indented block")
@@ -210,12 +232,16 @@ class Parser:
       variants.append(EnumVariant(variant_name.value, payload_type))
 
     self._expect(TokenType.DEDENT, "Expected dedent")
-    return EnumDef(name_token.value, tuple(variants))
+    return EnumDef(name_token.value, tuple(type_params), tuple(variants))
 
   def _parse_impl(self) -> ImplBlock:
-    """Parse: impl StructName: INDENT fn method(self, ...) -> type: ... DEDENT"""
+    """Parse: impl StructName<T, U>: INDENT fn method(self, ...) -> type: ... DEDENT"""
     self._expect(TokenType.IMPL, "Expected 'impl'")
     struct_name = self._expect(TokenType.IDENT, "Expected struct name")
+
+    # Parse optional type parameters: <T, U>
+    type_params = self._parse_type_params()
+
     self._expect(TokenType.COLON, "Expected ':'")
     self._expect(TokenType.NEWLINE, "Expected newline after ':'")
     self._expect(TokenType.INDENT, "Expected indented block")
@@ -228,14 +254,94 @@ class Parser:
       methods.append(self._parse_function())
 
     self._expect(TokenType.DEDENT, "Expected dedent")
-    return ImplBlock(struct_name.value, tuple(methods))
+    return ImplBlock(struct_name.value, tuple(type_params), tuple(methods))
+
+  def _parse_type_params(self) -> list[str]:
+    """Parse type parameters: <T, U, V> - returns empty list if no type params."""
+    type_params: list[str] = []
+    if self._check(TokenType.LT):
+      self._advance()  # consume '<'
+      type_params.append(self._expect(TokenType.IDENT, "Expected type parameter name").value)
+      while self._check(TokenType.COMMA):
+        self._advance()
+        if self._check(TokenType.GT):
+          break  # Allow trailing comma
+        type_params.append(self._expect(TokenType.IDENT, "Expected type parameter name").value)
+      self._expect(TokenType.GT, "Expected '>'")
+    return type_params
+
+  def _type_to_str(self, t: TypeAnnotation) -> str:
+    """Convert type annotation to string for match arm enum names."""
+    match t:
+      case SimpleType(name):
+        return name
+      case ArrayType(elem, size):
+        return f"[{self._type_to_str(elem)};{size}]"
+      case VecType(elem):
+        return f"vec[{self._type_to_str(elem)}]"
+      case TupleType(elems):
+        return f"({','.join(self._type_to_str(e) for e in elems)})"
+      case RefType(inner, mutable):
+        prefix = "&mut " if mutable else "&"
+        return f"{prefix}{self._type_to_str(inner)}"
+      case FnType(params, ret):
+        param_strs = ",".join(self._type_to_str(p) for p in params)
+        return f"Fn({param_strs})->{self._type_to_str(ret)}"
+      case ResultType(ok_type, err_type):
+        return f"Result[{self._type_to_str(ok_type)},{self._type_to_str(err_type)}]"
+      case DictType(key_type, value_type):
+        return f"dict[{self._type_to_str(key_type)},{self._type_to_str(value_type)}]"
+      case GenericType(name, type_args):
+        args_str = ",".join(self._type_to_str(a) for a in type_args)
+        return f"{name}<{args_str}>"
+    return "unknown"
+
+  def _looks_like_generic_instantiation(self) -> bool:
+    """Check if current position looks like a generic type instantiation.
+
+    This helps disambiguate `Name<T>` (generic) from `name < value` (comparison).
+    We scan ahead to find matching `>` and check if followed by `{`, `::`, or `(`.
+    """
+    if not self._check(TokenType.LT):
+      return False
+
+    # Save position
+    saved_pos = self.pos
+    depth = 0
+    self._advance()  # consume '<'
+    depth = 1
+
+    while not self._at_end() and depth > 0:
+      if self._check(TokenType.LT):
+        depth += 1
+      elif self._check(TokenType.GT):
+        depth -= 1
+        if depth == 0:
+          # Found matching '>', check what follows
+          self._advance()  # consume '>'
+          # Now check for struct literal, enum literal, or generic function call
+          result = self._check(TokenType.LBRACE, TokenType.COLONCOLON, TokenType.LPAREN)
+          self.pos = saved_pos  # restore position
+          return result
+      elif self._check(TokenType.NEWLINE, TokenType.EOF, TokenType.SEMICOLON):
+        # Hit end of expression - not a generic
+        self.pos = saved_pos
+        return False
+      self._advance()
+
+    # Didn't find matching '>'
+    self.pos = saved_pos
+    return False
 
   def _parse_function(self) -> Function:
-    """Parse: fn name(params) -> type: INDENT body DEDENT"""
+    """Parse: fn name<T, U>(params) -> type: INDENT body DEDENT"""
     self._expect(TokenType.FN, "Expected 'fn'")
 
     name_token = self._expect(TokenType.IDENT, "Expected function name")
     name = name_token.value
+
+    # Parse optional type parameters: <T, U>
+    type_params = self._parse_type_params()
 
     self._expect(TokenType.LPAREN, "Expected '('")
     params = self._parse_parameters()
@@ -248,7 +354,7 @@ class Parser:
     self._expect(TokenType.NEWLINE, "Expected newline after ':'")
     body = self._parse_block()
 
-    return Function(name, tuple(params), return_type, tuple(body))
+    return Function(name, tuple(type_params), tuple(params), return_type, tuple(body))
 
   def _parse_parameters(self) -> list[Parameter]:
     """Parse comma-separated parameters."""
@@ -266,10 +372,15 @@ class Parser:
     return params
 
   def _parse_parameter(self) -> Parameter:
-    """Parse: name: type or just 'self' for methods."""
-    # Handle 'self' parameter (no type annotation needed)
+    """Parse: name: type or 'self' or 'self: Type' for methods."""
+    # Handle 'self' parameter - may or may not have type annotation
     if self._check(TokenType.SELF):
       self._advance()
+      # Check if there's an explicit type annotation
+      if self._check(TokenType.COLON):
+        self._advance()
+        type_ann = self._parse_type()
+        return Parameter("self", type_ann)
       # Use placeholder type "Self" - type checker will resolve it
       return Parameter("self", SimpleType("Self"))
 
@@ -356,6 +467,19 @@ class Parser:
       value_type = self._parse_type()
       self._expect(TokenType.RBRACKET, "Expected ']' in dict type")
       return DictType(key_type, value_type)
+
+    # Check for generic type instantiation: Name<T1, T2>
+    if self._check(TokenType.LT):
+      self._advance()  # consume '<'
+      type_args: list[TypeAnnotation] = []
+      type_args.append(self._parse_type())
+      while self._check(TokenType.COMMA):
+        self._advance()
+        if self._check(TokenType.GT):
+          break  # Allow trailing comma
+        type_args.append(self._parse_type())
+      self._expect(TokenType.GT, "Expected '>'")
+      return GenericType(token.value, tuple(type_args))
 
     return SimpleType(token.value)
 
@@ -611,7 +735,23 @@ class Parser:
       name = token.value
       self._advance()
 
-      # Check if it's an enum literal: EnumName::Variant or EnumName::Variant(payload)
+      # Check for generic type arguments: Name<T1, T2>
+      # Only parse as generics if followed by `{` (struct literal) or `::` (enum literal)
+      # to avoid ambiguity with less-than comparison operator
+      type_args: tuple[TypeAnnotation, ...] = ()
+      if self._check(TokenType.LT) and self._looks_like_generic_instantiation():
+        self._advance()  # consume '<'
+        type_args_list: list[TypeAnnotation] = []
+        type_args_list.append(self._parse_type())
+        while self._check(TokenType.COMMA):
+          self._advance()
+          if self._check(TokenType.GT):
+            break  # Allow trailing comma
+          type_args_list.append(self._parse_type())
+        self._expect(TokenType.GT, "Expected '>'")
+        type_args = tuple(type_args_list)
+
+      # Check if it's an enum literal: EnumName::Variant or EnumName<T>::Variant(payload)
       if self._check(TokenType.COLONCOLON):
         self._advance()  # consume '::'
         variant_name = self._expect(TokenType.IDENT, "Expected variant name")
@@ -620,27 +760,32 @@ class Parser:
           self._advance()
           payload = self._parse_expression()
           self._expect(TokenType.RPAREN, "Expected ')'")
-        return self._parse_postfix(EnumLiteral(name, variant_name.value, payload))
+        return self._parse_postfix(EnumLiteral(name, type_args, variant_name.value, payload))
       # Check for Ok(value) and Err(value) - Result constructors
-      elif name == "Ok" and self._check(TokenType.LPAREN):
+      elif name == "Ok" and self._check(TokenType.LPAREN) and not type_args:
         self._advance()
         value = self._parse_expression()
         self._expect(TokenType.RPAREN, "Expected ')' after Ok value")
         expr: Expr = OkExpr(value)
-      elif name == "Err" and self._check(TokenType.LPAREN):
+      elif name == "Err" and self._check(TokenType.LPAREN) and not type_args:
         self._advance()
         value = self._parse_expression()
         self._expect(TokenType.RPAREN, "Expected ')' after Err value")
         expr = ErrExpr(value)
-      # Check if it's a function call
+      # Check if it's a function call (with or without type arguments)
       elif self._check(TokenType.LPAREN):
         self._advance()
         args, kwargs = self._parse_arguments()
         self._expect(TokenType.RPAREN, "Expected ')'")
-        expr = CallExpr(name, tuple(args), tuple(kwargs))
-      # Check if it's a struct literal: Name { field: value, ... }
+        # For generic function calls like identity<i64>(42), mangle the name
+        if type_args:
+          mangled_name = f"{name}<{','.join(self._type_to_str(t) for t in type_args)}>"
+          expr = CallExpr(mangled_name, tuple(args), tuple(kwargs))
+        else:
+          expr = CallExpr(name, tuple(args), tuple(kwargs))
+      # Check if it's a struct literal: Name { field: value, ... } or Name<T, U> { ... }
       elif self._check(TokenType.LBRACE):
-        expr = self._parse_struct_literal(name)
+        expr = self._parse_struct_literal(name, type_args)
       else:
         expr = VarExpr(name)
 
@@ -774,8 +919,8 @@ class Parser:
         break
     return expr
 
-  def _parse_struct_literal(self, name: str) -> StructLiteral:
-    """Parse struct literal: Name { field: value, ... }."""
+  def _parse_struct_literal(self, name: str, type_args: tuple[TypeAnnotation, ...] = ()) -> StructLiteral:
+    """Parse struct literal: Name { field: value, ... } or Name<T, U> { field: value, ... }."""
     self._expect(TokenType.LBRACE, "Expected '{'")
     fields: list[tuple[str, Expr]] = []
 
@@ -795,7 +940,7 @@ class Parser:
         fields.append((field_name.value, field_value))
 
     self._expect(TokenType.RBRACE, "Expected '}'")
-    return StructLiteral(name, tuple(fields))
+    return StructLiteral(name, type_args, tuple(fields))
 
   def _parse_array_literal(self) -> ArrayLiteral | ListComprehension:
     """Parse array literal [expr, expr, ...] or list comprehension [expr for var in range(start, end) if cond]."""
@@ -861,26 +1006,42 @@ class Parser:
       if self._check(TokenType.DEDENT, TokenType.EOF):
         break
 
-      # Parse arm pattern: EnumName::Variant(binding) or Ok(binding)/Err(binding) for Result
+      # Parse arm pattern: EnumName::Variant(binding), EnumName<T>::Variant(binding),
+      # or Ok(binding)/Err(binding) for Result
       first_ident = self._expect(TokenType.IDENT, "Expected enum name or variant")
 
+      # Check for generic type arguments in enum name: EnumName<T, U>
+      enum_name = first_ident.value
+      if self._check(TokenType.LT):
+        # Parse generic type args: <T1, T2, ...>
+        self._advance()  # consume '<'
+        type_arg_strs: list[str] = []
+        type_arg_strs.append(self._type_to_str(self._parse_type()))
+        while self._check(TokenType.COMMA):
+          self._advance()
+          if self._check(TokenType.GT):
+            break
+          type_arg_strs.append(self._type_to_str(self._parse_type()))
+        self._expect(TokenType.GT, "Expected '>'")
+        # Mangle the enum name with type args: EnumName<i64> -> EnumName<i64>
+        enum_name = f"{first_ident.value}<{','.join(type_arg_strs)}>"
+
       # Check if this is Ok/Err (Result shorthand) or EnumName::Variant
+      binding: str | None = None
       if first_ident.value in ("Ok", "Err") and self._check(TokenType.LPAREN):
         # Result shorthand: Ok(binding) or Err(binding)
         enum_name = "Result"
         variant_name = first_ident.value
         self._advance()  # consume '('
         binding_token = self._expect(TokenType.IDENT, "Expected binding name")
-        binding: str | None = binding_token.value
+        binding = binding_token.value
         self._expect(TokenType.RPAREN, "Expected ')'")
       else:
-        # Standard enum: EnumName::Variant or EnumName::Variant(binding)
-        enum_name = first_ident.value
+        # Standard enum: EnumName::Variant or EnumName<T>::Variant(binding)
         self._expect(TokenType.COLONCOLON, "Expected '::'")
         variant_token = self._expect(TokenType.IDENT, "Expected variant name")
         variant_name = variant_token.value
 
-        binding = None
         if self._check(TokenType.LPAREN):
           self._advance()
           binding_token = self._expect(TokenType.IDENT, "Expected binding name")

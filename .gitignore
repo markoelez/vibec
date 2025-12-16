@@ -31,6 +31,8 @@ examples/results
 examples/comprehensions
 examples/hashmaps
 examples/constants
+examples/type_aliases
+examples/generics
 
 # uv lock file
 uv.lock

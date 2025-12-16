@@ -33,10 +33,10 @@ class Compiler:
       ast = parse(tokens)
 
       # Type checking
-      check(ast)
+      type_check_result = check(ast)
 
       # Code generation
-      assembly = generate(ast)
+      assembly = generate(ast, type_check_result)
 
       return CompileResult(success=True, assembly=assembly)
 

@@ -1,5 +1,9 @@
 """ARM64 code generator for macOS."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from .ast import (
   Expr,
   Stmt,
@@ -38,6 +42,7 @@ from .ast import (
   ClosureExpr,
   DictLiteral,
   EnumLiteral,
+  GenericType,
   ArrayLiteral,
   TupleLiteral,
   StringLiteral,
@@ -54,28 +59,38 @@ from .ast import (
   ListComprehension,
 )
 
+if TYPE_CHECKING:
+  from .checker import TypeCheckResult, InstantiatedMethod, InstantiatedFunction
 
-def type_to_str(t: TypeAnnotation) -> str:
-  """Convert type annotation to string."""
+
+def type_to_str(t: TypeAnnotation, type_aliases: dict[str, str] | None = None) -> str:
+  """Convert type annotation to string, resolving type aliases if provided."""
+  aliases = type_aliases or {}
   match t:
     case SimpleType(name):
+      # Resolve type alias if it exists
+      if name in aliases:
+        return aliases[name]
       return name
     case ArrayType(elem, size):
-      return f"[{type_to_str(elem)};{size}]"
+      return f"[{type_to_str(elem, aliases)};{size}]"
     case VecType(elem):
-      return f"vec[{type_to_str(elem)}]"
+      return f"vec[{type_to_str(elem, aliases)}]"
     case TupleType(elems):
-      return f"({','.join(type_to_str(e) for e in elems)})"
+      return f"({','.join(type_to_str(e, aliases) for e in elems)})"
     case ResultType(ok_type, err_type):
-      return f"Result[{type_to_str(ok_type)},{type_to_str(err_type)}]"
+      return f"Result[{type_to_str(ok_type, aliases)},{type_to_str(err_type, aliases)}]"
     case DictType(key_type, value_type):
-      return f"dict[{type_to_str(key_type)},{type_to_str(value_type)}]"
+      return f"dict[{type_to_str(key_type, aliases)},{type_to_str(value_type, aliases)}]"
     case RefType(inner, mutable):
       prefix = "&mut " if mutable else "&"
-      return f"{prefix}{type_to_str(inner)}"
+      return f"{prefix}{type_to_str(inner, aliases)}"
     case FnType(params, ret):
-      param_strs = ",".join(type_to_str(p) for p in params)
-      return f"Fn({param_strs})->{type_to_str(ret)}"
+      param_strs = ",".join(type_to_str(p, aliases) for p in params)
+      return f"Fn({param_strs})->{type_to_str(ret, aliases)}"
+    case GenericType(name, type_args):
+      args_str = ",".join(type_to_str(a, aliases) for a in type_args)
+      return f"{name}<{args_str}>"
   return "unknown"
 
 
@@ -89,11 +104,11 @@ def is_dict_type(type_str: str) -> bool:
   return type_str.startswith("dict[")
 
 
-def get_array_size(type_str: str) -> int | None:
-  """Extract size from array type string like [i64;5]."""
+def get_array_size(type_str: str) -> int:
+  """Extract size from array type string like [i64;5]. Returns 0 if not an array."""
   if type_str.startswith("[") and ";" in type_str:
     return int(type_str[type_str.index(";") + 1 : -1])
-  return None
+  return 0
 
 
 def is_vec_type(type_str: str) -> bool:
@@ -101,9 +116,34 @@ def is_vec_type(type_str: str) -> bool:
   return type_str.startswith("vec[")
 
 
+def is_array_type(type_str: str) -> bool:
+  """Check if type is an array like [i64;5]."""
+  return type_str.startswith("[") and ";" in type_str
+
+
 def is_tuple_type(type_str: str) -> bool:
   """Check if type is a tuple."""
   return type_str.startswith("(") and type_str.endswith(")")
+
+
+def get_tuple_size(type_str: str) -> int:
+  """Get number of elements in tuple type like (i64,i64) -> 2."""
+  if not is_tuple_type(type_str):
+    return 0
+  inner = type_str[1:-1]  # Remove parentheses
+  if not inner:
+    return 0
+  # Count elements by tracking depth
+  depth = 0
+  count = 1
+  for c in inner:
+    if c in "([":
+      depth += 1
+    elif c in ")]":
+      depth -= 1
+    elif c == "," and depth == 0:
+      count += 1
+  return count
 
 
 def is_enum_type(type_str: str, enums: dict[str, dict[str, tuple[int, bool]]]) -> bool:
@@ -114,16 +154,6 @@ def is_enum_type(type_str: str, enums: dict[str, dict[str, tuple[int, bool]]]) -
 def is_result_type(type_str: str) -> bool:
   """Check if type is a Result."""
   return type_str.startswith("Result[")
-
-
-def get_tuple_size(type_str: str) -> int:
-  """Get number of elements in a tuple type string."""
-  if not is_tuple_type(type_str):
-    return 0
-  inner = type_str[1:-1]
-  if not inner:
-    return 0
-  return len(inner.split(","))
 
 
 class CodeGenerator:
@@ -151,6 +181,8 @@ class CodeGenerator:
     # String literals: value -> label
     self.strings: dict[str, str] = {}
     self.string_counter = 0
+    # Type aliases: alias_name -> resolved_type_string
+    self.type_aliases: dict[str, str] = {}
     # Struct definitions: name -> list of (field_name, field_type)
     self.structs: dict[str, list[tuple[str, str]]] = {}
     # Enum definitions: name -> dict of variant_name -> (tag, has_payload)
@@ -262,7 +294,7 @@ class CodeGenerator:
         self._collect_strings_from_expr(target)
         for arg in args:
           self._collect_strings_from_expr(arg)
-      case StructLiteral(_, fields):
+      case StructLiteral(_, _, fields):
         for _, value in fields:
           self._collect_strings_from_expr(value)
       case FieldAccessExpr(target, _):
@@ -272,7 +304,7 @@ class CodeGenerator:
           self._collect_strings_from_expr(elem)
       case TupleIndexExpr(target, _):
         self._collect_strings_from_expr(target)
-      case EnumLiteral(_, _, payload):
+      case EnumLiteral(_, _, _, payload):
         if payload is not None:
           self._collect_strings_from_expr(payload)
       case MatchExpr(target, arms):
@@ -315,31 +347,70 @@ class CodeGenerator:
       case _:
         pass
 
-  def generate(self, program: Program) -> str:
+  def generate(self, program: Program, type_check_result: "TypeCheckResult | None" = None) -> str:
     """Generate assembly for the entire program."""
-    # Register struct definitions
+    # Register type aliases first (so they can be used in other definitions)
+    for alias in program.type_aliases:
+      # Resolve the target type (may use other aliases registered earlier)
+      resolved = type_to_str(alias.target, self.type_aliases)
+      self.type_aliases[alias.name] = resolved
+
+    # Register struct definitions (skip generic structs)
     for struct in program.structs:
-      fields = [(f.name, type_to_str(f.type_ann)) for f in struct.fields]
+      if struct.type_params:
+        continue  # Skip generic structs - they're instantiated below
+      fields = [(f.name, type_to_str(f.type_ann, self.type_aliases)) for f in struct.fields]
       self.structs[struct.name] = fields
 
-    # Register enum definitions
+    # Register enum definitions (skip generic enums)
     for enum in program.enums:
+      if enum.type_params:
+        continue  # Skip generic enums - they're instantiated below
       variants: dict[str, tuple[int, bool]] = {}
       for i, variant in enumerate(enum.variants):
         has_payload = variant.payload_type is not None
         variants[variant.name] = (i, has_payload)
       self.enums[enum.name] = variants
 
-    # Register struct methods (with mangled names)
+    # Register instantiated generic types from type checker
+    if type_check_result:
+      for mangled_name, fields in type_check_result.instantiated_structs.items():
+        self.structs[mangled_name] = fields
+      for mangled_name, inst_variants in type_check_result.instantiated_enums.items():
+        # Convert from (tag, has_payload, payload_type) to (tag, has_payload)
+        converted: dict[str, tuple[int, bool]] = {}
+        for name, (tag, has_payload, _) in inst_variants.items():
+          converted[name] = (tag, has_payload)
+        self.enums[mangled_name] = converted
+
+    # Register struct methods (with mangled names) - skip generic impl blocks
     for impl in program.impls:
+      if impl.type_params:
+        continue  # Skip generic impl blocks
+      # Skip if this is an impl for a generic struct
+      if impl.struct_name in [s.name for s in program.structs if s.type_params]:
+        continue
       if impl.struct_name not in self.struct_methods:
         self.struct_methods[impl.struct_name] = {}
       for method in impl.methods:
         mangled_name = f"{impl.struct_name}_{method.name}"
         self.struct_methods[impl.struct_name][method.name] = mangled_name
 
-    # Register function parameter names (for kwargs resolution)
+    # Register instantiated generic struct methods
+    if type_check_result:
+      for mangled_name, inst_method in type_check_result.instantiated_methods.items():
+        struct_mangled = inst_method.struct_mangled_name
+        if struct_mangled not in self.struct_methods:
+          self.struct_methods[struct_mangled] = {}
+        # The method's assembly label
+        asm_label = self._mangle_generic_name(mangled_name)
+        # Remove leading _ since _gen_method_call adds it
+        self.struct_methods[struct_mangled][inst_method.original_method.name] = asm_label[1:]
+
+    # Register function parameter names (for kwargs resolution) - skip generic functions
     for func in program.functions:
+      if func.type_params:
+        continue  # Skip generic functions
       self.function_params[func.name] = [p.name for p in func.params]
 
     # First pass: collect all string literals
@@ -367,14 +438,32 @@ class CodeGenerator:
     self._emit(".globl _main")
     self._emit("")
 
-    # Generate impl block methods
+    # Generate impl block methods (skip generic impl blocks)
     for impl in program.impls:
+      if impl.type_params:
+        continue  # Skip generic impl blocks
+      # Skip if this is an impl for a generic struct (handled separately)
+      if impl.struct_name in [s.name for s in program.structs if s.type_params]:
+        continue
       for method in impl.methods:
         mangled_name = f"{impl.struct_name}_{method.name}"
         self._gen_function(method, mangled_name, impl.struct_name)
 
+    # Generate instantiated generic methods
+    if type_check_result:
+      for mangled_name, inst_method in type_check_result.instantiated_methods.items():
+        self._gen_instantiated_method(inst_method)
+
+    # Generate functions (skip generic functions)
     for func in program.functions:
+      if func.type_params:
+        continue  # Skip generic functions
       self._gen_function(func)
+
+    # Generate instantiated generic functions
+    if type_check_result:
+      for mangled_name, inst_func in type_check_result.instantiated_functions.items():
+        self._gen_instantiated_function(inst_func)
 
     # Generate closure functions (collected during code generation)
     for label, params, return_type, body in self.closures:
@@ -406,7 +495,7 @@ class CodeGenerator:
     # Store parameters
     for i, param in enumerate(params):
       offset = -16 - (self.next_slot * 8)
-      type_str = type_to_str(param.type_ann)
+      type_str = type_to_str(param.type_ann, self.type_aliases)
       self.locals[param.name] = (offset, type_str)
       if i < 8:
         self._emit(f"    str x{i}, [x29, #{offset}]")
@@ -426,6 +515,175 @@ class CodeGenerator:
     self.locals = old_locals
     self.next_slot = old_next_slot
     self.current_func_name = old_func_name
+
+  def _gen_instantiated_function(self, inst_func: "InstantiatedFunction") -> None:
+    """Generate code for an instantiated generic function."""
+    # The mangled name uses <> which is not valid in assembly labels
+    # Convert to a valid label: identity<i64> -> _identity_i64
+    label = self._mangle_generic_name(inst_func.mangled_name)
+
+    # Save current state
+    old_locals = self.locals
+    old_next_slot = self.next_slot
+    old_func_name = self.current_func_name
+
+    self.locals = {}
+    self.next_slot = 0
+    self.current_func_name = label
+
+    func = inst_func.original_func
+    subst = inst_func.type_subst
+
+    # Count locals needed (with substituted types)
+    local_count = len(func.params) + self._count_locals_with_subst(func.body, subst)
+    frame_size = max(48, (32 + local_count * 8 + 15) & ~15)
+    self.frame_size = frame_size
+
+    # Emit function prologue
+    self._emit(f"{label}:")
+    self._emit(f"    sub sp, sp, #{frame_size}")
+    self._emit(f"    stp x29, x30, [sp, #{frame_size - 16}]")
+    self._emit(f"    add x29, sp, #{frame_size - 16}")
+
+    # Store parameters with substituted types
+    for i, (param, param_type) in enumerate(zip(func.params, inst_func.param_types)):
+      slots = self._slots_for_type_str(param_type)
+      offset = -16 - (self.next_slot * 8)
+      self.locals[param.name] = (offset, param_type)
+      if i < 8:
+        if slots == 1:
+          self._emit(f"    str x{i}, [x29, #{offset}]")
+        else:
+          # Multi-slot parameter (struct, tuple, etc.)
+          for j in range(slots):
+            self._emit(f"    str x{i + j}, [x29, #{offset - j * 8}]")
+      self.next_slot += slots
+
+    # Store the substitution map for use during code generation
+    old_type_subst = getattr(self, "current_type_subst", None)
+    self.current_type_subst = subst
+
+    # Generate body
+    for stmt in func.body:
+      self._gen_stmt(stmt)
+
+    self.current_type_subst = old_type_subst
+
+    # Emit epilogue
+    self._emit(f"{label}_epilogue:")
+    self._emit(f"    ldp x29, x30, [sp, #{frame_size - 16}]")
+    self._emit(f"    add sp, sp, #{frame_size}")
+    self._emit("    ret")
+    self._emit("")
+
+    # Restore state
+    self.locals = old_locals
+    self.next_slot = old_next_slot
+    self.current_func_name = old_func_name
+
+  def _gen_instantiated_method(self, inst_method: "InstantiatedMethod") -> None:
+    """Generate code for an instantiated generic method."""
+    # The mangled name uses <> which is not valid in assembly labels
+    # Convert to a valid label: Box<i64>_get -> _Box_i64__get
+    label = self._mangle_generic_name(inst_method.mangled_name)
+
+    # Save current state
+    old_locals = self.locals
+    old_next_slot = self.next_slot
+    old_func_name = self.current_func_name
+
+    self.locals = {}
+    self.next_slot = 0
+    self.current_func_name = label
+
+    method = inst_method.original_method
+    subst = inst_method.type_subst
+
+    # Count locals needed (with substituted types)
+    local_count = len(method.params) + self._count_locals_with_subst(method.body, subst)
+    frame_size = max(48, (32 + local_count * 8 + 15) & ~15)
+    self.frame_size = frame_size
+
+    # Emit function prologue
+    self._emit(f"{label}:")
+    self._emit(f"    sub sp, sp, #{frame_size}")
+    self._emit(f"    stp x29, x30, [sp, #{frame_size - 16}]")
+    self._emit(f"    add x29, sp, #{frame_size - 16}")
+
+    # Store parameters with substituted types
+    for i, (param, param_type) in enumerate(zip(method.params, inst_method.param_types)):
+      slots = self._slots_for_type_str(param_type)
+      offset = -16 - (self.next_slot * 8)
+      self.locals[param.name] = (offset, param_type)
+      if i < 8:
+        if slots == 1:
+          self._emit(f"    str x{i}, [x29, #{offset}]")
+        else:
+          # Multi-slot parameter (struct, tuple, etc.)
+          for j in range(slots):
+            self._emit(f"    str x{i + j}, [x29, #{offset - j * 8}]")
+      self.next_slot += slots
+
+    # Store the substitution map and struct name for use during code generation
+    old_type_subst = getattr(self, "current_type_subst", None)
+    old_current_struct = getattr(self, "current_struct_name", None)
+    self.current_type_subst = subst
+    self.current_struct_name = inst_method.struct_mangled_name
+
+    # Generate body
+    for stmt in method.body:
+      self._gen_stmt(stmt)
+
+    self.current_type_subst = old_type_subst
+    self.current_struct_name = old_current_struct
+
+    # Emit epilogue
+    self._emit(f"{label}_epilogue:")
+    self._emit(f"    ldp x29, x30, [sp, #{frame_size - 16}]")
+    self._emit(f"    add sp, sp, #{frame_size}")
+    self._emit("    ret")
+    self._emit("")
+
+    # Restore state
+    self.locals = old_locals
+    self.next_slot = old_next_slot
+    self.current_func_name = old_func_name
+
+  def _mangle_generic_name(self, name: str) -> str:
+    """Convert a generic name like 'identity<i64>' to a valid assembly label."""
+    # Replace < with _, > with empty, and add underscore prefix
+    result = name.replace("<", "_").replace(">", "").replace(",", "_")
+    return f"_{result}"
+
+  def _count_locals_with_subst(self, stmts: tuple[Stmt, ...], subst: dict[str, str]) -> int:
+    """Count local variable slots needed, using type substitution for generics."""
+    count = 0
+    for stmt in stmts:
+      match stmt:
+        case LetStmt(_, type_ann, _):
+          type_str = self._substitute_type_str(type_to_str(type_ann, self.type_aliases), subst)
+          count += self._slots_for_type_str(type_str)
+        case IfStmt(_, then_body, else_body):
+          count += self._count_locals_with_subst(then_body, subst)
+          if else_body:
+            count += self._count_locals_with_subst(else_body, subst)
+        case WhileStmt(_, body):
+          count += self._count_locals_with_subst(body, subst)
+        case ForStmt(_, _, _, body):
+          count += 2  # Loop variable + end value temp
+          count += self._count_locals_with_subst(body, subst)
+        case ExprStmt(MatchExpr(_, arms)):
+          for arm in arms:
+            if arm.binding is not None:
+              count += 1  # Binding variable slot
+            count += self._count_locals_with_subst(arm.body, subst)
+    return count
+
+  def _substitute_type_str(self, type_str: str, subst: dict[str, str]) -> str:
+    """Apply type substitution to a type string."""
+    for param, concrete in subst.items():
+      type_str = type_str.replace(param, concrete)
+    return type_str
 
   def _count_locals(self, stmts: tuple[Stmt, ...]) -> int:
     """Count local variable slots needed (arrays need multiple slots)."""
@@ -471,6 +729,24 @@ class CodeGenerator:
         return 1  # Simple types are 8 bytes
       case _:
         return 1
+
+  def _slots_for_type_str(self, type_str: str) -> int:
+    """Return number of 8-byte slots needed for a type string (supports type aliases)."""
+    if is_array_type(type_str):
+      return get_array_size(type_str)
+    if is_vec_type(type_str):
+      return 1  # Vec is a pointer
+    if is_dict_type(type_str):
+      return 1  # Dict is a pointer
+    if is_tuple_type(type_str):
+      return get_tuple_size(type_str)
+    if is_result_type(type_str):
+      return 2  # Result needs 2 slots: tag + payload
+    if type_str in self.structs:
+      return len(self.structs[type_str])
+    if type_str in self.enums:
+      return 2  # Enums need 2 slots: tag + payload
+    return 1  # Simple types are 8 bytes
 
   def _gen_function(self, func: Function, mangled_name: str | None = None, impl_struct: str | None = None) -> None:
     """Generate assembly for a function or method."""
@@ -529,7 +805,7 @@ class CodeGenerator:
         self.next_slot += num_fields
         continue
 
-      type_str = type_to_str(param.type_ann)
+      type_str = type_to_str(param.type_ann, self.type_aliases)
       self.locals[param.name] = (offset, type_str)
       slots_needed = self._slots_for_type(param.type_ann)
 
@@ -568,143 +844,165 @@ class CodeGenerator:
   def _gen_stmt(self, stmt: Stmt) -> None:
     """Generate assembly for a statement."""
     match stmt:
-      case LetStmt(name, type_ann, value):
-        type_str = type_to_str(type_ann)
+      case LetStmt(name, type_ann, value, _):
+        type_str = type_to_str(type_ann, self.type_aliases)
         offset = -16 - (self.next_slot * 8)
         self.locals[name] = (offset, type_str)
-        slots_needed = self._slots_for_type(type_ann)
+        slots_needed = self._slots_for_type_str(type_str)
 
-        match type_ann:
-          case ArrayType(_, size):
-            # Array: initialize elements in place
-            match value:
-              case ArrayLiteral(elements):
-                for i, elem in enumerate(elements):
-                  self._gen_expr(elem)
+        # Use type_str to determine handling (supports type aliases)
+        if is_array_type(type_str):
+          # Array: initialize elements in place
+          size = get_array_size(type_str)
+          match value:
+            case ArrayLiteral(elements):
+              for i, elem in enumerate(elements):
+                self._gen_expr(elem)
+                self._emit(f"    str x0, [x29, #{offset - i * 8}]")
+              # Zero-fill remaining slots if literal is smaller
+              for i in range(len(elements), size):
+                self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+            case _:
+              # Initialize all to zero
+              for i in range(size):
+                self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+          self.next_slot += slots_needed
+
+        elif is_vec_type(type_str):
+          # Check if value is empty array literal -> allocate new vec
+          # Otherwise, evaluate expression (returns vec pointer) and store it
+          match value:
+            case ArrayLiteral(elements) if not elements:
+              # Empty array: allocate initial buffer (16 elements * 8 bytes + 16 header)
+              # Header: [capacity, length] at base, data follows
+              self._emit("    mov x0, #144")  # 16 + 16*8 = 144 bytes
+              self._emit("    bl _malloc")
+              self._emit("    mov x1, #16")  # Initial capacity
+              self._emit("    str x1, [x0]")  # Store capacity
+              self._emit("    str xzr, [x0, #8]")  # Length = 0
+              self._emit(f"    str x0, [x29, #{offset}]")
+            case _:
+              # Expression returns vec pointer (from skip, take, map, etc.)
+              self._gen_expr(value)
+              self._emit(f"    str x0, [x29, #{offset}]")
+          self.next_slot += 1
+
+        elif type_str in self.structs:
+          # Struct type: initialize fields in place
+          fields = self.structs[type_str]
+          match value:
+            case StructLiteral(_, _, field_values):
+              # Map field name -> value for lookup
+              value_map = dict(field_values)
+              for i, (field_name, _) in enumerate(fields):
+                if field_name in value_map:
+                  self._gen_expr(value_map[field_name])
                   self._emit(f"    str x0, [x29, #{offset - i * 8}]")
-                # Zero-fill remaining slots if literal is smaller
-                for i in range(len(elements), size):
-                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
-              case _:
-                # Initialize all to zero
-                for i in range(size):
-                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
-            self.next_slot += slots_needed
-
-          case VecType(_):
-            # Check if value is empty array literal -> allocate new vec
-            # Otherwise, evaluate expression (returns vec pointer) and store it
-            match value:
-              case ArrayLiteral(elements) if not elements:
-                # Empty array: allocate initial buffer (16 elements * 8 bytes + 16 header)
-                # Header: [capacity, length] at base, data follows
-                self._emit("    mov x0, #144")  # 16 + 16*8 = 144 bytes
-                self._emit("    bl _malloc")
-                self._emit("    mov x1, #16")  # Initial capacity
-                self._emit("    str x1, [x0]")  # Store capacity
-                self._emit("    str xzr, [x0, #8]")  # Length = 0
-                self._emit(f"    str x0, [x29, #{offset}]")
-              case _:
-                # Expression returns vec pointer (from skip, take, map, etc.)
-                self._gen_expr(value)
-                self._emit(f"    str x0, [x29, #{offset}]")
-            self.next_slot += 1
-
-          case SimpleType(name) if name in self.structs:
-            # Struct type: initialize fields in place
-            fields = self.structs[name]
-            match value:
-              case StructLiteral(_, field_values):
-                # Map field name -> value for lookup
-                value_map = dict(field_values)
-                for i, (field_name, _) in enumerate(fields):
-                  if field_name in value_map:
-                    self._gen_expr(value_map[field_name])
-                    self._emit(f"    str x0, [x29, #{offset - i * 8}]")
-                  else:
-                    self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
-              case VarExpr(src_name):
-                # Copy struct from another variable
-                src_offset, _ = self.locals[src_name]
-                for i in range(len(fields)):
-                  self._emit(f"    ldr x0, [x29, #{src_offset - i * 8}]")
-                  self._emit(f"    str x0, [x29, #{offset - i * 8}]")
-              case _:
-                # Initialize all to zero
-                for i in range(len(fields)):
-                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
-            self.next_slot += len(fields)
-
-          case TupleType(elems):
-            # Tuple type: initialize elements in place
-            match value:
-              case TupleLiteral(elements):
-                for i, elem in enumerate(elements):
-                  self._gen_expr(elem)
-                  self._emit(f"    str x0, [x29, #{offset - i * 8}]")
-              case _:
-                # Initialize all to zero
-                for i in range(len(elems)):
-                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
-            self.next_slot += len(elems)
-
-          case SimpleType(sname) if sname in self.enums:
-            # Enum type: store tag and payload (2 slots)
-            match value:
-              case EnumLiteral(_, variant_name, payload):
-                variants = self.enums[sname]
-                tag, _ = variants[variant_name]
-                self._emit(f"    mov x0, #{tag}")
-                self._emit(f"    str x0, [x29, #{offset}]")  # Tag at first slot
-                if payload is not None:
-                  self._gen_expr(payload)
-                  self._emit(f"    str x0, [x29, #{offset - 8}]")  # Payload at second slot
                 else:
-                  self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Zero payload
-              case _:
-                self._emit(f"    str xzr, [x29, #{offset}]")  # Tag = 0
-                self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Payload = 0
-            self.next_slot += 2
+                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+            case VarExpr(src_name):
+              # Copy struct from another variable
+              src_offset, _ = self.locals[src_name]
+              for i in range(len(fields)):
+                self._emit(f"    ldr x0, [x29, #{src_offset - i * 8}]")
+                self._emit(f"    str x0, [x29, #{offset - i * 8}]")
+            case CallExpr(_, _, _) | MethodCallExpr(_, _, _):
+              # Function/method call returning a struct
+              # For single-field structs, the value is returned in x0
+              # For multi-field structs, values are returned in x0, x1, x2, ...
+              self._gen_expr(value)
+              # Store returned value(s) - for now assume single field
+              # TODO: handle multi-field struct returns properly
+              if len(fields) == 1:
+                self._emit(f"    str x0, [x29, #{offset}]")
+              else:
+                # For multi-field, the return is currently just x0
+                # Store it in first slot, zero others
+                self._emit(f"    str x0, [x29, #{offset}]")
+                for i in range(1, len(fields)):
+                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+            case _:
+              # Other expressions - evaluate and store
+              self._gen_expr(value)
+              if len(fields) == 1:
+                self._emit(f"    str x0, [x29, #{offset}]")
+              else:
+                self._emit(f"    str x0, [x29, #{offset}]")
+                for i in range(1, len(fields)):
+                  self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+          self.next_slot += len(fields)
 
-          case ResultType(_, _):
-            # Result type: tag (0=Ok, 1=Err) + payload (2 slots)
-            match value:
-              case OkExpr(ok_value):
-                self._emit("    mov x0, #0")  # Ok tag = 0
-                self._emit(f"    str x0, [x29, #{offset}]")
-                self._gen_expr(ok_value)
-                self._emit(f"    str x0, [x29, #{offset - 8}]")
-              case ErrExpr(err_value):
-                self._emit("    mov x0, #1")  # Err tag = 1
-                self._emit(f"    str x0, [x29, #{offset}]")
-                self._gen_expr(err_value)
-                self._emit(f"    str x0, [x29, #{offset - 8}]")
-              case _:
-                # Expression that returns a Result (e.g., function call)
-                self._gen_expr(value)
-                # x0 has tag, x1 has payload (if Result was returned from function)
-                self._emit(f"    str x0, [x29, #{offset}]")
-                self._emit(f"    str x1, [x29, #{offset - 8}]")
-            self.next_slot += 2
+        elif is_tuple_type(type_str):
+          # Tuple type: initialize elements in place
+          tuple_size = get_tuple_size(type_str)
+          match value:
+            case TupleLiteral(elements):
+              for i, elem in enumerate(elements):
+                self._gen_expr(elem)
+                self._emit(f"    str x0, [x29, #{offset - i * 8}]")
+            case _:
+              # Initialize all to zero
+              for i in range(tuple_size):
+                self._emit(f"    str xzr, [x29, #{offset - i * 8}]")
+          self.next_slot += tuple_size
 
-          case DictType(_, _):
-            # Dict type: store pointer
-            match value:
-              case DictLiteral(entries):
-                # Create dict from literal
-                self._gen_dict_literal(entries)
-                self._emit(f"    str x0, [x29, #{offset}]")
-              case _:
-                # Empty dict or expression returning dict
-                self._gen_expr(value)
-                self._emit(f"    str x0, [x29, #{offset}]")
-            self.next_slot += 1
+        elif type_str in self.enums:
+          # Enum type: store tag and payload (2 slots)
+          match value:
+            case EnumLiteral(_, _, variant_name, payload):
+              variants = self.enums[type_str]
+              tag, _ = variants[variant_name]
+              self._emit(f"    mov x0, #{tag}")
+              self._emit(f"    str x0, [x29, #{offset}]")  # Tag at first slot
+              if payload is not None:
+                self._gen_expr(payload)
+                self._emit(f"    str x0, [x29, #{offset - 8}]")  # Payload at second slot
+              else:
+                self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Zero payload
+            case _:
+              self._emit(f"    str xzr, [x29, #{offset}]")  # Tag = 0
+              self._emit(f"    str xzr, [x29, #{offset - 8}]")  # Payload = 0
+          self.next_slot += 2
 
-          case _:
-            # Simple type: evaluate and store
-            self._gen_expr(value)
-            self._emit(f"    str x0, [x29, #{offset}]")
-            self.next_slot += 1
+        elif is_result_type(type_str):
+          # Result type: tag (0=Ok, 1=Err) + payload (2 slots)
+          match value:
+            case OkExpr(ok_value):
+              self._emit("    mov x0, #0")  # Ok tag = 0
+              self._emit(f"    str x0, [x29, #{offset}]")
+              self._gen_expr(ok_value)
+              self._emit(f"    str x0, [x29, #{offset - 8}]")
+            case ErrExpr(err_value):
+              self._emit("    mov x0, #1")  # Err tag = 1
+              self._emit(f"    str x0, [x29, #{offset}]")
+              self._gen_expr(err_value)
+              self._emit(f"    str x0, [x29, #{offset - 8}]")
+            case _:
+              # Expression that returns a Result (e.g., function call)
+              self._gen_expr(value)
+              # x0 has tag, x1 has payload (if Result was returned from function)
+              self._emit(f"    str x0, [x29, #{offset}]")
+              self._emit(f"    str x1, [x29, #{offset - 8}]")
+          self.next_slot += 2
+
+        elif is_dict_type(type_str):
+          # Dict type: store pointer
+          match value:
+            case DictLiteral(entries):
+              # Create dict from literal
+              self._gen_dict_literal(entries)
+              self._emit(f"    str x0, [x29, #{offset}]")
+            case _:
+              # Empty dict or expression returning dict
+              self._gen_expr(value)
+              self._emit(f"    str x0, [x29, #{offset}]")
+          self.next_slot += 1
+
+        else:
+          # Simple type: evaluate and store
+          self._gen_expr(value)
+          self._emit(f"    str x0, [x29, #{offset}]")
+          self.next_slot += 1
 
       case AssignStmt(name, value):
         # Evaluate value to x0
@@ -1000,10 +1298,22 @@ class CodeGenerator:
       case MethodCallExpr(target, method, args):
         self._gen_method_call(target, method, args)
 
-      case StructLiteral(name, fields):
+      case StructLiteral(name, type_args, fields):
         # Struct literal outside of let: allocate temp and return address
         # This is uncommon, but we can handle it
-        struct_fields = self.structs[name]
+        # Resolve mangled struct name for generic structs
+        struct_name = name
+        if type_args:
+          # Apply type substitution if we're in a generic context
+          resolved_type_args: list[str] = []
+          for a in type_args:
+            arg_str = type_to_str(a, self.type_aliases)
+            current_subst = getattr(self, "current_type_subst", None)
+            if current_subst is not None and arg_str in current_subst:
+              arg_str = current_subst[arg_str]
+            resolved_type_args.append(arg_str)
+          struct_name = f"{name}<{','.join(resolved_type_args)}>"
+        struct_fields = self.structs[struct_name]
         value_map = dict(fields)
         # Store fields on stack temporarily
         for i, (field_name, _) in enumerate(struct_fields):
@@ -1061,7 +1371,7 @@ class CodeGenerator:
             self._gen_expr(target)
             pass
 
-      case EnumLiteral(enum_name, variant_name, payload):
+      case EnumLiteral(enum_name, _, variant_name, payload):
         # Enum literal: just return the tag (for simple comparisons)
         # Full enum storage is handled in LetStmt
         variants = self.enums[enum_name]
@@ -1856,8 +2166,13 @@ class CodeGenerator:
         self._emit(f"    ldr x{reg_idx}, [sp], #16")
         reg_idx += 1
 
-    # Call function
-    self._emit(f"    bl _{name}")
+    # Call function (handle generic names)
+    if "<" in name:
+      # Generic function - use mangled name
+      label = self._mangle_generic_name(name)
+      self._emit(f"    bl {label}")
+    else:
+      self._emit(f"    bl _{name}")
 
   def _gen_closure_call(self, name: str, args: tuple[Expr, ...]) -> None:
     """Generate code for calling a closure stored in a variable."""
@@ -2117,7 +2432,7 @@ class CodeGenerator:
         case "len":
           # Array length is compile-time constant
           size = get_array_size(type_str)
-          if size is not None:
+          if size > 0:
             self._emit(f"    mov x0, #{size}")
 
   def _gen_vec_skip(self, src_offset: int, skip_expr: Expr) -> None:
@@ -2799,6 +3114,6 @@ class CodeGenerator:
     # Match result is in x0 from the last executed arm's return
 
 
-def generate(program: Program) -> str:
+def generate(program: Program, type_check_result: "TypeCheckResult | None" = None) -> str:
   """Convenience function to generate assembly for a program."""
-  return CodeGenerator().generate(program)
+  return CodeGenerator().generate(program, type_check_result)

@@ -82,6 +82,30 @@ fn main() -> i64:
     x + PI_APPROX
 ```
 
+**Rust-style Type Aliases:**
+```
+# Simple type aliases
+type Integer = i64
+type IntVec = vec[i64]
+type IntPair = (i64, i64)
+
+# Type alias for struct
+struct Point:
+    x: i64
+    y: i64
+type Vec2D = Point
+
+fn add(a: Integer, b: Integer) -> Integer:
+    a + b
+
+fn main() -> i64:
+    let x: Integer = 10
+    let nums: IntVec = []
+    nums.push(1)
+    let p: Vec2D = Point { x: 5, y: 10 }
+    add(x, p.x)  # 15
+```
+
 **Result Type and Error Propagation (like Rust):**
 ```
 # Function that can fail returns Result[OkType, ErrType]
@@ -161,7 +185,51 @@ fn main() -> i64:
     0
 ```
 
-**Supported:** `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
+**Rust-style Generics with Monomorphization:**
+```
+# Generic struct with type parameter
+struct Box<T>:
+    value: T
+
+# Generic impl block - methods on generic structs
+impl Box<T>:
+    fn get(self: Box<T>) -> T:
+        self.value
+
+# Generic function - requires explicit type args
+fn identity<T>(x: T) -> T:
+    x
+
+fn make_box<T>(val: T) -> Box<T>:
+    Box<T> { value: val }
+
+# Generic enum (like Rust's Option)
+enum Option<T>:
+    Some(T)
+    None
+
+fn main() -> i64:
+    # Generic struct with methods
+    let b: Box<i64> = Box<i64> { value: 42 }
+    print(b.get())  # 42
+    
+    # Generic functions (explicit type args required)
+    print(identity<i64>(100))  # 100
+    let boxed: Box<i64> = make_box<i64>(77)
+    print(boxed.get())  # 77
+    
+    # Generic enum with pattern matching
+    let opt: Option<i64> = Option<i64>::Some(50)
+    match opt:
+        Option<i64>::Some(val):
+            print(val)  # 50
+        Option<i64>::None:
+            print(0)
+    
+    return 0
+```
+
+**Supported:** generics (structs, enums, functions, impl blocks), type aliases, `const` declarations, hashmaps with dict comprehensions (`dict[K,V]`), list comprehensions, `Result[T, E]` type with `?` operator, functional iterators (`map`, `filter`, `fold`, `skip`, `take`, `sum`), implicit return, ownership & borrowing, enums with `match`, keyword args, structs with `impl`, tuples, arrays, vectors, closures.
 
 
 ## Architecture
@@ -221,12 +289,11 @@ vibec source.vb --keep-asm
 
 ## Todo
 
-- Type aliases
-- Python-style Chained comparison
-- Pattern guards
-- Generics
-- Rust-style traits
-- Python-style slice syntax 
+- Type inference for generic function calls (currently requires explicit type args)
+- Chained comparisons (python)
+- Pattern guards (rust)
+- Traits (rust)
+- Slice syntax (python)
 
 ## License
 
