@@ -29,8 +29,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 
-[tool.ty.src]
-root = "src"
-
 [tool.ty.environment]
 python-version = "3.12"
+root = ["src"]

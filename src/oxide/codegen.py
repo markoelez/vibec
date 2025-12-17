@@ -2411,9 +2411,9 @@ class CodeGenerator:
     # then push everything onto stack in correct order, then pop into registers.
 
     # Step 1: Evaluate left operand and save to a temp area on stack
-    left_is_var = isinstance(left, VarExpr)
     left_offset = 0
-    if left_is_var:
+    left_is_var = isinstance(left, VarExpr)
+    if isinstance(left, VarExpr):
       left_offset, _ = self.locals[left.name]
     else:
       # Evaluate left expression - result is in x0, x1, ... for multi-field structs
@@ -2423,8 +2423,8 @@ class CodeGenerator:
         self._emit(f"    str x{i}, [sp, #-16]!")
 
     # Step 2: Evaluate right operand and push onto stack (in reverse field order for final layout)
-    right_is_var = isinstance(right, VarExpr)
-    if right_is_var:
+    right_offset = 0
+    if isinstance(right, VarExpr):
       right_offset, _ = self.locals[right.name]
       if right_is_struct:
         for i in range(len(right_fields) - 1, -1, -1):
